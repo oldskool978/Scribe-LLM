@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Scribe-LLM Control Plane</title>
+    
+    <link rel="stylesheet" href="css/fonts.css">
+    <link rel="stylesheet" href="css/styles.css">
+    
+    <link rel="stylesheet" href="lib/katex/katex.min.css">
+    
+    <style id="native-utilities">
+        .mt-4 { margin-top: 24px !important; }
+        .mb-4 { margin-bottom: 24px !important; }
+        .pb-3 { padding-bottom: 16px !important; }
+        .border-bottom-subtle { border-bottom: 1px solid var(--border-subtle) !important; }
+    </style>
+</head>
+<body class="scribe-dark">
+    <div id="app-root" class="app-viewport">
+        
+        <header class="top-nav-bar">
+            <div class="nav-left">
+                <h1 class="brand-title">Scribe-LLM</h1>
+                <div id="status-indicator" class="status-badge status-offline">
+                    <span class="pulse-dot"></span>
+                    <span id="status-text">Agent Offline</span>
+                </div>
+            </div>
+
+            <div class="nav-center">
+                <div class="global-core-selector">
+                    <select id="model-selector" disabled>
+                        <option value="">Awaiting Gateway Synchronization...</option>
+                    </select>
+                    <div id="model-spinner" class="nav-spinner hidden"></div>
+                </div>
+            </div>
+
+            <div class="nav-right">
+                <button id="btn-open-acquisition" class="icon-btn" title="Model Acquisition Pipeline">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                </button>
+                <button id="btn-open-hardware" class="icon-btn" title="Hardware Topology">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
+                </button>
+                <button id="btn-open-physics" class="icon-btn" title="Inference Physics">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                </button>
+                
+                <button id="btn-master-power" class="icon-btn master-power-btn" title="Ignite Neural Core" disabled>
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="chat-viewport">
+            <div id="chat-history" class="scroll-container">
+                <div id="system-banner" class="welcome-banner">
+                    <h2>Control Plane Active</h2>
+                    <p>Select a Neural Core and engage the Master Power Toggle to proceed.</p>
+                </div>
+            </div>
+
+            <div class="input-orchestrator compositor-locked" id="compositor-node">
+                
+                <div class="orchestrator-header">
+                    <div class="cog-toggle-container">
+                        <label class="cog-switch">
+                            <input type="checkbox" id="toggle-cognition">
+                            <span class="cog-slider"></span>
+                        </label>
+                        <span class="cog-label">Deep Cognition Loop</span>
+                    </div>
+                </div>
+
+                <div id="media-staging-tray" class="staging-tray hidden"></div>
+                <div id="drop-zone-overlay" class="drop-overlay hidden">
+                    <span>Drop Image to Stage in VRAM</span>
+                </div>
+
+                <div class="input-wrapper">
+                    <input type="file" id="hidden-file-input" accept="image/png, image/jpeg, image/webp" hidden>
+                    <button id="btn-attach" class="action-btn attach-btn" title="Stage Image">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                    </button>
+                    
+                    <textarea id="chat-input" rows="1" placeholder="Core offline. Awaiting ignition..." disabled autocomplete="off" spellcheck="false"></textarea>
+                    
+                    <button id="btn-submit" class="action-btn submit-btn" disabled>
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <div id="modal-backdrop" class="modal-backdrop hidden"></div>
+
+        <aside id="modal-hardware-topology" class="control-modal hidden">
+            <header class="modal-header">
+                <h2>Hardware Topology</h2>
+                <button class="close-modal-btn icon-btn" data-target="modal-hardware-topology">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+            <div class="modal-body">
+                
+                <section class="hardware-profile mb-4 pb-3 border-bottom-subtle">
+                    <div class="metric-group">
+                        <span class="metric-label">Compute Graph</span>
+                        <span id="meta-arch" class="metric-value">Offline</span>
+                    </div>
+                    <div class="metric-group">
+                        <span class="metric-label">Accelerator VRAM</span>
+                        <span id="meta-vram" class="metric-value">Waiting...</span>
+                    </div>
+                    <div class="metric-group">
+                        <span class="metric-label">Host Memory (System RAM)</span>
+                        <span id="meta-ram" class="metric-value">Waiting...</span>
+                    </div>
+                </section>
+
+                <section class="hardware-config">
+                    <div class="slider-control">
+                        <div class="slider-header">
+                            <label for="param-layers">VRAM Offload (GPU Layers)</label>
+                            <span id="val-layers-display" class="metric-value">Max</span>
+                        </div>
+                        <input type="range" id="param-layers" min="0" max="99" step="1" value="99">
+                    </div>
+
+                    <div class="slider-control">
+                        <div class="slider-header">
+                            <label for="param-ctx">VRAM Context Horizon</label>
+                            <span id="val-ctx-display" class="metric-value">8192</span>
+                        </div>
+                        <input type="range" id="param-ctx" min="0" max="11" step="1" value="4">
+                    </div>
+
+                    <div class="grid-2-col mt-4">
+                        <div class="control-group mb-0">
+                            <label class="metric-label">Batch Saturation</label>
+                            <div class="select-wrapper">
+                                <select id="param-batch">
+                                    <option value="512">512 (Safe)</option>
+                                    <option value="1024" selected>1024 (Balanced)</option>
+                                    <option value="2048">2048 (Fast)</option>
+                                    <option value="4096">4096 (Max Pipeline)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="slider-control mb-0">
+                            <div class="slider-header">
+                                <label for="param-threads">Compute Threads</label>
+                                <span id="val-threads-display" class="metric-value">8</span>
+                            </div>
+                            <input type="range" id="param-threads" min="1" max="64" step="1" value="8">
+                        </div>
+                    </div>
+
+                    <div class="control-group mt-3">
+                        <label class="metric-label">KV Cache Quantization (Rotoquant Target)</label>
+                        <div class="select-wrapper">
+                            <select id="kv-selector">
+                                <option value="auto" selected>Auto (GGUF Physics)</option>
+                                <option value="f16">F16 (High Precision)</option>
+                                <option value="bf16">BF16 (Bfloat16)</option>
+                                <option value="q8_0">Q8_0 (Balanced)</option>
+                                <option value="q4_0">Q4_0 (Max VRAM Savings)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="hardware-toggles mt-3">
+                        <label class="checkbox-label" title="FA2 Optimized Context Scaling">
+                            <input type="checkbox" id="param-fa" checked>
+                            <span>Flash Attention</span>
+                        </label>
+                        <label class="checkbox-label" title="Prevent System Swap/Pageout">
+                            <input type="checkbox" id="param-mlock">
+                            <span>Memory Lock (mlock)</span>
+                        </label>
+                        <label class="checkbox-label" title="Force Immediate RAM Load">
+                            <input type="checkbox" id="param-mmap">
+                            <span>Disable MMap</span>
+                        </label>
+                    </div>
+                </section>
+            </div>
+        </aside>
+
+        <aside id="modal-inference-physics" class="control-modal hidden">
+            <header class="modal-header">
+                <h2>Inference Physics</h2>
+                <button class="close-modal-btn icon-btn" data-target="modal-inference-physics">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+            <div class="modal-body">
+                <section class="inference-parameters">
+                    
+                    <div class="control-group mb-4 pb-3 border-bottom-subtle">
+                        <label class="metric-label">Cognitive Profile Matrix</label>
+                        <div class="select-wrapper mt-2">
+                            <select id="param-preset">
+                                <option value="balanced" selected>Balanced / Chat (Optimal)</option>
+                                <option value="analytical">Analytical / Logic (Strict)</option>
+                                <option value="creative">Creative / Divergent</option>
+                                <option value="legacy">Legacy / Hard Truncation</option>
+                                <option value="custom">Custom (Manual Override)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="slider-control">
+                        <div class="slider-header">
+                            <label for="param-temp">Temperature (Entropy Matrix)</label>
+                            <span id="val-temp">0.70</span>
+                        </div>
+                        <input type="range" id="param-temp" min="0.0" max="2.0" step="0.05" value="0.70">
+                    </div>
+                    <div class="slider-control">
+                        <div class="slider-header">
+                            <label for="param-minp">Min-P (Dynamic Tail Truncation)</label>
+                            <span id="val-minp">0.05</span>
+                        </div>
+                        <input type="range" id="param-minp" min="0.0" max="1.0" step="0.01" value="0.05">
+                    </div>
+                    <div class="slider-control">
+                        <div class="slider-header">
+                            <label for="param-topk">Top-K (Absolute Failsafe)</label>
+                            <span id="val-topk">0</span>
+                        </div>
+                        <input type="range" id="param-topk" min="0" max="100" step="1" value="0">
+                    </div>
+                    <div class="slider-control">
+                        <div class="slider-header">
+                            <label for="param-reppen">Repetition Penalty</label>
+                            <span id="val-reppen">1.05</span>
+                        </div>
+                        <input type="range" id="param-reppen" min="1.0" max="2.0" step="0.01" value="1.05">
+                    </div>
+                    <div class="slider-control mt-3">
+                        <div class="slider-header">
+                            <label for="param-maxtokens">Max Output Tokens</label>
+                            <span id="val-maxtokens">4096</span>
+                        </div>
+                        <input type="range" id="param-maxtokens" min="256" max="32768" step="256" value="4096">
+                    </div>
+                </section>
+            </div>
+        </aside>
+
+        <aside id="modal-model-acquisition" class="control-modal hidden expanded-modal">
+            <header class="modal-header">
+                <h2>Model Acquisition & Tensor Compilation</h2>
+                <button class="close-modal-btn icon-btn" data-target="modal-model-acquisition">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </header>
+            <div class="modal-body p-0">
+                <div class="acq-grid">
+                    
+                    <div class="acq-left-pane">
+                        
+                        <div class="control-group mb-0">
+                            <label class="metric-label flex-between">
+                                <span>Hub Repository Search</span>
+                                <span id="acq-auth-status" class="auth-status-text" title="Click to set HuggingFace Token (Optional)">HF Token: Unset</span>
+                            </label>
+                            <div class="search-input-group">
+                                <input type="text" id="acq-search-input" placeholder="e.g., bartowski/Meta-Llama-3-8B-Instruct-GGUF" autocomplete="off" spellcheck="false">
+                                <button id="acq-btn-search" class="primary-btn shrink-0">Search</button>
+                            </div>
+                        </div>
+
+                        <div id="acq-search-results" class="scroll-container results-box">
+                            <div class="empty-state">Awaiting Hub Query...</div>
+                        </div>
+
+                        <div class="control-group mt-auto border-top-subtle pt-3">
+                            <label class="metric-label">Target Artifact / Quantization Profile</label>
+                            <div class="select-wrapper mt-2">
+                                <select id="acq-quant-select" disabled>
+                                    <option value="">Select a repository to probe bounds...</option>
+                                </select>
+                            </div>
+                            
+                            <div id="acq-projection-box" class="projection-box hidden">
+                                <span class="metric-label">Projected Footprint:</span>
+                                <span id="acq-projection-value" class="metric-value highlight">-- GB</span>
+                            </div>
+                        </div>
+
+                        <button id="acq-btn-execute" class="primary-btn w-100" disabled>
+                            <span id="acq-execute-text">Initialize Payload Transfer</span>
+                            <div id="acq-spinner" class="spinner hidden spinner-inline"></div>
+                        </button>
+                    </div>
+
+                    <div class="acq-right-pane">
+                        <div class="terminal-bar">
+                            <span class="terminal-title">Pipeline Telemetry</span>
+                            <span id="acq-connection-status" class="terminal-status">Idle</span>
+                        </div>
+                        <div id="acq-terminal-output" class="terminal-body scroll-container">Engine standing by...</div>
+                    </div>
+
+                </div>
+            </div>
+        </aside>
+
+    </div>
+
+    <script src="lib/markdown/marked.min.js"></script>
+    <script src="lib/markdown/purify.min.js"></script>
+    <script src="lib/ace/ace.js"></script>
+    
+    <script src="lib/katex/katex.min.js"></script>
+    <script src="lib/katex/contrib/auto-render.min.js"></script>
+
+    <script src="js/physics_engine.js"></script>
+    <script src="js/api_gateway.js"></script>
+    
+    <script src="js/compositor.js"></script>
+    <script src="js/neural_engine.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/acquisition.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "_start_node": "ZERO_SHOT_CHAT",
+  "_max_cycles": 1,
+  "_memory_struct": [
+    "_user_request", 
+    "_recent_chat_history", 
+    "message_to_user"
+  ],
+  "_system_root_instruction": "You are a precise and highly capable analytical engine. Always outline your reasoning step-by-step before answering.",
+  "_nodes": {
+    "ZERO_SHOT_CHAT": {
+      "_mode": "standard",
+      "_task_instruction": "Analyze the <_user_request>. \n1. Open a <think> block to reason through the problem step-by-step.\n2. Close the </think> block.\n3. Output your final, polished response directly to the user. If providing code, use ``` ",
+      "_read_memory": [
+        "_recent_chat_history", 
+        "_user_request"
+      ],
+      "_write_memory": "message_to_user",
+      "_inference_parameters": { 
+        "temperature": 0.50, 
+        "min_p": 0.05, 
+        "top_k": 0, 
+        "repeat_penalty": 1.05, 
+        "max_tokens": 4096 
+      },
+      "_next_step_logic": { 
+        "_default_": "EXIT_SUCCESS" 
+      }
+    }
+  }
+}

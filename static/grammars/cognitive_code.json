@@ -1,0 +1,54 @@
+{
+  "_start_node": "ARCHITECTURE_PLANNING",
+  "_max_cycles": 3,
+  "_memory_struct": [
+    "_user_request",
+    "_recent_chat_history",
+    "architecture_plan",
+    "optimal_code",
+    "message_to_user"
+  ],
+  "_system_root_instruction": "You are an elite software engineering AI. Ground all architecture in mathematical precision and algorithmic efficiency. Utilize <think> blocks for all latent reasoning.",
+  "_context_template": "<directive>\n{{INSTRUCTION}}\n</directive>\n\n<context>\n{{MEMORY}}\n</context>",
+  "_nodes": {
+    "ARCHITECTURE_PLANNING": {
+      "_mode": "mcts",
+      "_candidates": 3,
+      "_max_depth": 2,
+      "_evaluator_instruction": "Select the architecture candidate that guarantees the most efficient Big-O time/space complexity and flawlessly covers all edge cases. Write a 1-sentence <evaluation>, then output the winning index in <winner> tags. If the architecture is optimal and complete, include <status>resolved</status>.",
+      "_task_instruction": "Analyze the <_user_request> and <_recent_chat_history>. Utilize a <think> block to evaluate technical constraints, data structures, and edge cases. Draft a robust, mathematically optimal architecture plan. If the plan is completely finalized, append <status>resolved</status>.",
+      "_read_memory": [
+        "_recent_chat_history",
+        "_user_request"
+      ],
+      "_write_memory": "architecture_plan",
+      "_inference_parameters": { "temperature": 0.50, "min_p": 0.05, "top_k": 0, "repeat_penalty": 1.05, "max_tokens": 2048 },
+      "_next_step_logic": { "_default_": "CODE_GENERATION" }
+    },
+    "CODE_GENERATION": {
+      "_mode": "mcts",
+      "_candidates": 3,
+      "_max_depth": 2,
+      "_evaluator_instruction": "Select the code candidate that perfectly implements the architecture, is syntactically flawless, and adheres to all formatting rules. Write a 1-sentence <evaluation>, then the winning index in <winner> tags. If perfectly ready for production, include <status>resolved</status>.",
+      "_task_instruction": "Implement the architecture plan. Output the raw code implementation exclusively. Delegate all Markdown formatting and explanations to the Orchestrator. Conclude your output with exactly <status>resolved</status>.",
+      "_read_memory": [
+        "_user_request",
+        "architecture_plan"
+      ],
+      "_write_memory": "optimal_code",
+      "_inference_parameters": { "temperature": 0.60, "min_p": 0.05, "top_k": 0, "repeat_penalty": 1.05, "max_tokens": 8192 },
+      "_next_step_logic": { "_default_": "SYNTHESIS_EXPLANATION" }
+    },
+    "SYNTHESIS_EXPLANATION": {
+      "_mode": "standard",
+      "_task_instruction": "Summarize the technical decisions made in the implementation using standard prose. Focus entirely on the underlying logic and algorithmic choices.",
+      "_read_memory": [
+        "_user_request",
+        "optimal_code"
+      ],
+      "_write_memory": "message_to_user",
+      "_inference_parameters": { "temperature": 0.30, "min_p": 0.05, "top_k": 0, "repeat_penalty": 1.05, "max_tokens": 2048 },
+      "_next_step_logic": { "_default_": "EXIT_SUCCESS" }
+    }
+  }
+}

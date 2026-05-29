@@ -1,0 +1,10 @@
+huggingface_hub
+numpy
+safetensors
+sentencepiece
+protobuf
+accelerate
+transformers
+tiktoken
+blobfile
+einops

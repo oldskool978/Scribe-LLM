@@ -1,0 +1,39 @@
+{
+  "_start_node": "ANALYTICAL_REASONING",
+  "_max_cycles": 2,
+  "_memory_struct": [
+    "_user_request",
+    "_recent_chat_history",
+    "optimal_thought",
+    "message_to_user"
+  ],
+  "_system_root_instruction": "You are an advanced cognitive reasoning engine. All mathematical deduction and logical syllogisms must be formulated step-by-step.",
+  "_context_template": "<directive>\n{{INSTRUCTION}}\n</directive>\n\n<context>\n{{MEMORY}}\n</context>",
+  "_nodes": {
+    "ANALYTICAL_REASONING": {
+      "_mode": "mcts",
+      "_candidates": 3,
+      "_max_depth": 1,
+      "_evaluator_instruction": "Select the reasoning path that provides the most rigorous, factually correct deduction. Provide a concise <evaluation>, then the winning index in <winner> tags.",
+      "_task_instruction": "Analyze the <_user_request> and <_recent_chat_history>. Utilize a <think> block to reason through the prompt step-by-step.",
+      "_read_memory": [
+        "_recent_chat_history",
+        "_user_request"
+      ],
+      "_write_memory": "optimal_thought",
+      "_inference_parameters": { "temperature": 0.60, "min_p": 0.05, "top_k": 0, "max_tokens": 4096 },
+      "_next_step_logic": { "_default_": "SYNTHESIS_EXPLANATION" }
+    },
+    "SYNTHESIS_EXPLANATION": {
+      "_mode": "standard",
+      "_task_instruction": "Synthesize the final optimal response to the user. Base your response strictly on the established logical path. Output standard prose without wrapping it in a think block. If providing code, use ``` ",
+      "_read_memory": [
+        "_user_request",
+        "optimal_thought"
+      ],
+      "_write_memory": "message_to_user",
+      "_inference_parameters": { "temperature": 0.30, "min_p": 0.05, "top_k": 0, "max_tokens": 4096 },
+      "_next_step_logic": { "_default_": "EXIT_SUCCESS" }
+    }
+  }
+}

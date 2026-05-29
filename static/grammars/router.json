@@ -1,0 +1,45 @@
+{
+  "_start_node": "CLASSIFY_INTENT",
+  "_memory_struct": [
+    "_user_request", 
+    "_recent_chat_history", 
+    "_target_schema_json"
+  ],
+  "_system_root_instruction": "You are the Scribe-LLM Intent Classification Matrix. Your sole objective is absolute precision in deterministic routing.",
+  "_context_template": "<directive>\n{{INSTRUCTION}}\n</directive>\n\n<context>\n{{MEMORY}}\n</context>",
+  "_nodes": {
+    "CLASSIFY_INTENT": {
+      "_mode": "standard",
+      "_task_instruction": "Analyze the <_user_request> and <_recent_chat_history>. Classify the computational requirement and output a JSON object containing ONLY the 'target_schema' key.\nUse 'cognitive_code.json' for software engineering, debugging, or script generation.\nUse 'cognitive_chat.json' for deep analytical reasoning, complex deductions, or mathematics.\nUse 'cognitive_rlm.json' for tasks requiring massive context scanning, multi-document synthesis, or recursive data extraction.\nUse 'cognitive_base.json' for standard conversation or simple queries.\nDO NOT use standard markdown formatting. If you wrap your output, use CODEPHRASNLEGIT1json and CODEPHRASNLEGIT1.",
+      "_read_memory": [
+        "_recent_chat_history", 
+        "_user_request"
+      ],
+      "_write_memory": "_target_schema_json",
+      "_inference_parameters": { 
+        "temperature": 0.01, 
+        "min_p": 0.05, 
+        "top_k": 0, 
+        "max_tokens": 64 
+      },
+      "_json_schema": {
+        "type": "object",
+        "properties": {
+          "target_schema": {
+            "type": "string",
+            "enum": [
+              "cognitive_code.json", 
+              "cognitive_chat.json", 
+              "cognitive_rlm.json", 
+              "cognitive_base.json"
+            ]
+          }
+        },
+        "required": ["target_schema"]
+      },
+      "_next_step_logic": { 
+        "_default_": "EXIT_SUCCESS" 
+      }
+    }
+  }
+}

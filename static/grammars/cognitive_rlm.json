@@ -1,0 +1,31 @@
+{
+  "_start_node": "RECURSIVE_EXTRACTION",
+  "_max_cycles": 1,
+  "_memory_struct": [
+    "_user_request",
+    "_recent_chat_history",
+    "message_to_user"
+  ],
+  "_system_root_instruction": "You are a Recursive Language Model (RLM). You operate within a stateful, zero-amnesia read-eval-print loop (REPL). Your objective is to search, scan, and deductively synthesize massive data shards over wide context windows up to 256k+ tokens using clean programmatic VFS interactions.",
+  "_nodes": {
+    "RECURSIVE_EXTRACTION": {
+      "_mode": "rlm",
+      "_max_rlm_cycles": 15,
+      "_task_instruction": "Analyze the incoming request located in the user space. You have direct read access to massive context file layers via the Virtual File System (VFS).\n\nExecution Rules:\n1. To interrogate data logs, match structural metrics, or read chunks, write a targeted asynchronous script inside an <rlm_exec> container block.\n2. The sandbox will run your script and return the exact output within an <rlm_result> container.\n3. Iterate through data collection blocks until you have verified all required components.\n4. Once your answer is complete, formulate your final clear report to the user and conclude your execution trace explicitly with the token state: <status>resolved</status>.",
+      "_read_memory": [
+        "_recent_chat_history",
+        "_user_request"
+      ],
+      "_write_memory": "message_to_user",
+      "_inference_parameters": { 
+        "temperature": 0.15, 
+        "min_p": 0.05, 
+        "top_k": 0, 
+        "max_tokens": 4096 
+      },
+      "_next_step_logic": { 
+        "_default_": "EXIT_SUCCESS" 
+      }
+    }
+  }
+}

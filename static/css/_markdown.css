@@ -1,0 +1,341 @@
+/* Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md. */
+
+/**
+ * Scribe-LLM Visual Engine: Markdown & Typography Matrix
+ * Domain: Dynamic Text Rendering, Code Containment, and Theme Isolation
+ */
+
+/* ==========================================================================
+   Base Typography & Inline Elements
+   ========================================================================== */
+.markdown-body p { 
+    margin-top: 0; 
+    margin-bottom: 1em; 
+}
+
+.markdown-body p:last-child { 
+    margin-bottom: 0; 
+}
+
+.markdown-body strong { 
+    font-weight: 600; 
+    color: #fff; 
+}
+
+.markdown-body a { 
+    color: var(--accent-primary); 
+    text-decoration: none; 
+}
+
+.markdown-body a:hover { 
+    text-decoration: underline; 
+}
+
+.markdown-body ul, 
+.markdown-body ol { 
+    margin-top: 0; 
+    padding-left: 20px; 
+    margin-bottom: 1em; 
+}
+
+.markdown-body li { 
+    margin-bottom: 4px; 
+}
+
+.markdown-body code:not(pre code) {
+    font-family: var(--font-code);
+    font-size: 0.85em;
+    background-color: var(--bg-surface-elevated);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    color: #e4e4e7;
+}
+
+.markdown-body img {
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+/* ==========================================================================
+   Codeblock Containment Matrix (Augmented)
+   ========================================================================== */
+.markdown-body pre {
+    background-color: #141414;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin: 1.5em 0;
+    font-family: var(--font-code);
+    font-size: 0.9rem;
+    
+    /* Horizontal Constrainment (Preserves Author Intent) */
+    max-width: 100%;
+    box-sizing: border-box;
+    white-space: pre;      
+    word-break: normal;
+    overflow-x: auto;      
+    
+    /* VERTICAL CLIPPING ERADICATED: 
+       Codeblocks now expand naturally to author intent.
+       Scroll physics deferred to parent container (chat-history/modal). */
+}
+
+/* Custom Horizontal Scrollbars strictly for Codeblocks */
+.markdown-body pre::-webkit-scrollbar { width: 8px; height: 8px; }
+.markdown-body pre::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: var(--radius-sm); }
+.markdown-body pre::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: var(--radius-sm); }
+.markdown-body pre::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+/* ==========================================================================
+   Code Orchestration Engine (Ace Integration)
+   ========================================================================== */
+.scribe-ace-wrapper {
+    background-color: #141414;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin: 1.5em 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.ace-action-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1a1a1a;
+    padding: 8px 16px;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.ace-lang-label {
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.ace-copy-btn {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: var(--font-ui);
+    transition: all var(--transition-snappy);
+}
+
+.ace-copy-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+    background-color: rgba(255,255,255,0.05);
+}
+
+.ace-copy-btn.success {
+    color: var(--status-ready);
+    border-color: var(--status-ready);
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+.scribe-ace-editor { 
+    width: 100%; 
+    /* Ace Editor height is dynamically managed by JS autosize policies, 
+       ensuring synchronization with the eradicated vertical clipping constraint. */
+}
+
+/* ==========================================================================
+   GGUFicator Light Theme Markdown (README Viewer Isolation)
+   ========================================================================== */
+.gguf-light-markdown {
+    --light-bg: #fdfbf7;
+    --light-panel: #ffffff;
+    --light-text: #292524;
+    --light-muted: #78716c;
+    --light-border: #e7e5e4;
+    --light-accent: #f59e0b;
+    color: var(--light-text);
+    background-color: var(--light-bg);
+}
+
+.gguf-light-markdown p, 
+.gguf-light-markdown ul, 
+.gguf-light-markdown ol { 
+    color: var(--light-text); 
+}
+
+.gguf-light-markdown h1, 
+.gguf-light-markdown h2, 
+.gguf-light-markdown h3, 
+.gguf-light-markdown h4, 
+.gguf-light-markdown h5, 
+.gguf-light-markdown h6 { 
+    color: var(--light-text); 
+    border-bottom-color: var(--light-border); 
+}
+
+.gguf-light-markdown a { color: var(--light-accent); }
+.gguf-light-markdown a:hover { color: #ea580c; }
+.gguf-light-markdown strong { color: #000; }
+
+.gguf-light-markdown code:not(pre code) { 
+    background-color: var(--light-panel); 
+    color: #ea580c; 
+    border: 1px solid var(--light-border); 
+}
+
+.gguf-light-markdown pre { 
+    background-color: #1c1917; /* Dark terminal for code blocks */
+    border: 1px solid #3f3f46;
+}
+
+.gguf-light-markdown pre code { color: #34d399; }
+
+.gguf-light-markdown blockquote { 
+    border-left: 4px solid var(--light-accent); 
+    background-color: var(--light-panel); 
+    color: var(--light-muted); 
+}
+
+.gguf-light-markdown th, 
+.gguf-light-markdown td { 
+    border-color: var(--light-border); 
+}
+
+.gguf-light-markdown th { 
+    background-color: var(--light-panel); 
+    color: var(--light-text); 
+}
+
+.gguf-light-markdown hr { 
+    background-color: var(--light-border); 
+    border: none; 
+}
+
+/* Custom Scrollbar for Light Theme */
+.gguf-light-markdown::-webkit-scrollbar-thumb { background-color: var(--light-border); }
+.gguf-light-markdown::-webkit-scrollbar-thumb:hover { background-color: var(--light-muted); }
+
+/* ==========================================================================
+   Structural Flexbox Overrides (Markdown Isolation)
+   ========================================================================== */
+#readme-modal-body {
+    min-width: 0;          /* Crucial: Prevents flex children from overflowing parent */
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;    /* Contain standard text */
+    overflow-y: auto;      /* Modal governs vertical space now */
+}
+
+/* ==========================================================================
+   AST State Machine Render Matrix (Deep Cognition & RLM)
+   ========================================================================== */
+
+/* Base Collapsible Thought Block (Latent Reasoning) */
+.scribe-thought-block {
+    margin: 1.2em 0;
+    border: 1px solid var(--cog-active-border);
+    border-radius: var(--radius-md);
+    background-color: var(--cog-active-bg);
+    overflow: hidden;
+    transition: all var(--transition-snappy);
+}
+
+.thought-header {
+    padding: 10px 16px;
+    background-color: rgba(0, 0, 0, 0.3);
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--cog-active-glow);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid transparent;
+}
+
+.scribe-thought-block[open] .thought-header {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.thought-content {
+    padding: 16px;
+    font-size: 0.9em;
+    color: var(--text-secondary);
+}
+
+/* RLM Execution Sandbox (Terminal Green) */
+.scribe-thought-block.rlm-exec-block {
+    background-color: var(--rlm-exec-bg);
+    border-color: var(--rlm-exec-border);
+    box-shadow: 0 0 16px var(--rlm-exec-glow);
+}
+
+.thought-header.rlm-header {
+    color: var(--rlm-exec-border);
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+/* RLM Telemetry Dump (Tactical Blue) */
+.scribe-thought-block.rlm-result-block {
+    background-color: var(--rlm-result-bg);
+    border-color: var(--rlm-result-border);
+    margin-top: -0.5em; /* Pulls it tight against the execution block */
+}
+
+.thought-header.rlm-result-header {
+    color: var(--rlm-result-border);
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+/* DisCIPL MCTS Evaluation Badges */
+.scribe-candidate-block {
+    margin: 1em 0;
+    padding: 12px;
+    border-left: 3px solid var(--border-focus);
+    background-color: var(--bg-base);
+}
+
+.candidate-header {
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+}
+
+.scribe-evaluation {
+    font-size: 0.85rem;
+    padding: 8px 12px;
+    background-color: var(--mcts-eval-bg);
+    border: 1px dashed var(--mcts-eval-border);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    margin: 1em 0;
+}
+
+.scribe-winner {
+    font-family: var(--font-code);
+    font-size: 0.85rem;
+    color: var(--accent-primary);
+    margin-bottom: 1.5em;
+}
+
+/* Mathematical Convergence Status */
+.scribe-status-badge {
+    display: inline-flex;
+    align-items: center;
+    margin: 1em 0;
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    font-weight: 600;
+    background-color: rgba(16, 185, 129, 0.1);
+    color: var(--status-ready);
+    border: 1px solid var(--status-ready);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+}
