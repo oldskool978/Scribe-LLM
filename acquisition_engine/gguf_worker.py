@@ -236,7 +236,8 @@ def inspect_config_topology(config_path: Path) -> dict:
             ):
                 topology["is_moe"] = True
                 
-            if "vl" in arch_str or "vision" in arch_str or "llava" in arch_str or "mplug" in arch_str or "multimodal" in arch_str:
+            multimodal_anchors = ["vision_config", "vision_encoder", "audio_config", "whisper_config"]
+            if any(k in data for k in multimodal_anchors):
                 topology["is_multimodal"] = True
                 
             if "mtp" in arch_str or "multitoken" in arch_str:
@@ -532,6 +533,7 @@ class DAGExecutionEngine:
             "runpy.run_path(sys.argv.pop(1), run_name='__main__')\n"
         )
 
+        # Pass 1: Primary Text / Base Model Core Extraction
         cmd_convert = [
             sys.executable, "-u", "-c", bootstrap_payload,
             str(TARGET_DIR / "convert_hf_to_gguf.py"),
@@ -542,8 +544,6 @@ class DAGExecutionEngine:
             cmd_convert.append("--fuse-gate-up-exps")
         if self.ctx.topology.get("has_mtp"):
             cmd_convert.append("--no-mtp")
-        if self.ctx.topology.get("vocab_type"):
-            cmd_convert.extend(["--vocab-type", self.ctx.topology["vocab_type"]])
             
         self.ctx.hermetic_env = os.environ.copy()
         self.ctx.hermetic_env.pop("PYTHONHOME", None)
@@ -568,24 +568,60 @@ class DAGExecutionEngine:
         if process.returncode != 0: 
             raise RuntimeError(f"Base architectural transformation failed with exit code: {process.returncode}")
 
-        if self.ctx.topology.get("is_multimodal"):
-            staging_projectors = list(self.ctx.model_staging_dir.glob("*mmproj*")) + list(TARGET_DIR.glob("*mmproj*"))
-            output_projectors = list(OUTPUT_DIR.glob(f"*{self.ctx.safe_basename}*mmproj*")) + list(OUTPUT_DIR.glob("*mmproj*"))
-            all_candidates = staging_projectors + output_projectors
-            if all_candidates:
-                target_mmproj_name = OUTPUT_DIR / f"{self.ctx.safe_basename}-MMPROJ.gguf"
-                if all_candidates[0] != target_mmproj_name:
-                    try:
-                        shutil.move(str(all_candidates[0]), str(target_mmproj_name))
-                        print_log(f"[SUCCESS] Vision projection matrices bound to payload bay: {target_mmproj_name.name}")
-                    except Exception as e:
-                        print_log(f"[WARNING] Multimodal anchor linkage bypassed: {str(e)}")
-
+        # Deterministic Base Capture Rule: Lock onto raw text trunk files immediately.
+        # This completely walls off permanent sidecars from imatrix execution and deletion arrays.
         current_files = set(OUTPUT_DIR.iterdir())
         self.ctx.captured_base_shards = sorted([f for f in (current_files - existing_files) if f.is_file()])
         
         if not self.ctx.captured_base_shards:
             raise FileNotFoundError("Footprint tracking failure: Base compiler did not write structural output files.")
+
+        # Recalibrate tracking baseline to shield subsequent extractions from cleanup passes
+        existing_files = set(OUTPUT_DIR.iterdir())
+
+        # Pass 2: Secondary Multimodal Projector Extraction Pass
+        if self.ctx.topology.get("is_multimodal"):
+            target_mmproj_name = OUTPUT_DIR / f"{self.ctx.safe_basename}-MMPROJ.gguf"
+            print_log("[DAG NODE 3b] Executing Secondary Multi-Modal Projector Extraction Pass...")
+            
+            cmd_projector = [
+                sys.executable, "-u", "-c", bootstrap_payload,
+                str(TARGET_DIR / "convert_hf_to_gguf.py"),
+                str(self.ctx.model_staging_dir), "--outfile", str(target_mmproj_name),
+                "--outtype", "f16", "--mmproj"  # Force un-quantized F16 precision to safeguard alignment features
+            ]
+            
+            proj_process = subprocess.Popen(cmd_projector, cwd=str(TARGET_DIR), env=self.ctx.hermetic_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proj_process.stdout:
+                print_log(line.strip())
+            proj_process.wait()
+            
+            if proj_process.returncode == 0:
+                print_log(f"[SUCCESS] Vision projection matrices bound to payload bay: {target_mmproj_name.name}")
+            else:
+                print_log(f"[ERROR] Multimodal projector extraction failed with code: {proj_process.returncode}")
+
+        # Pass 3: Secondary Speculative MTP Draft Extraction Pass
+        if self.ctx.topology.get("has_mtp"):
+            target_mtp_name = OUTPUT_DIR / f"mtp-{self.ctx.safe_basename}-{self.ctx.profile}.gguf"
+            print_log("[DAG NODE 3c] Executing Secondary Speculative MTP Shard Extraction Pass...")
+            
+            cmd_mtp = [
+                sys.executable, "-u", "-c", bootstrap_payload,
+                str(TARGET_DIR / "convert_hf_to_gguf.py"),
+                str(self.ctx.model_staging_dir), "--outfile", str(target_mtp_name),
+                "--outtype", self.ctx.base_out_type, "--mtp"
+            ]
+            
+            mtp_process = subprocess.Popen(cmd_mtp, cwd=str(TARGET_DIR), env=self.ctx.hermetic_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in mtp_process.stdout:
+                print_log(line.strip())
+            mtp_process.wait()
+            
+            if mtp_process.returncode == 0:
+                print_log(f"[SUCCESS] Speculative MTP draft arrays bound to payload bay: {target_mtp_name.name}")
+            else:
+                print_log(f"[ERROR] Speculative MTP draft extraction failed with code: {mtp_process.returncode}")
 
     def node_fixed_entropy_corpus(self):
         if self.completed_early: return
