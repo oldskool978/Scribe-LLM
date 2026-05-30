@@ -42,6 +42,131 @@ _adapter = HTTPAdapter(pool_connections=100, pool_maxsize=100)
 PROXY_SESSION.mount('http://', _adapter)
 PROXY_SESSION.mount('https://', _adapter)
 
+# ==============================================================================
+# HERMETIC HARDWARE TOPOLOGY STATE ENGINE (UNPOISONED & OS-GNOSTIC)
+# ==============================================================================
+_LOCKED_TOPOLOGY = None  # Freezes to: "NVIDIA_CUDA", "AMD_HIP", "INTEL_XPU", "APPLE_METAL", or "CPU_NATIVE"
+_HERMETIC_HIP_PATH = None
+
+def find_hermetic_hipinfo() -> Optional[str]:
+    """Shallow fast-finder for the un-wrapped local hipinfo binary."""
+    global _HERMETIC_HIP_PATH
+    if _HERMETIC_HIP_PATH:
+        return _HERMETIC_HIP_PATH
+    
+    search_roots = [os.path.join(BASE_DIR, ".venv"), os.path.join(BASE_DIR, "venv"), BASE_DIR]
+    names = ["hipInfo.exe", "hipinfo.exe", "hipInfo", "hipinfo"] if os.name == 'nt' else ["hipinfo", "hipInfo"]
+    
+    for root in search_roots:
+        site_pkgs = os.path.join(root, "Lib", "site-packages")
+        if not os.path.exists(site_pkgs) and os.path.exists(os.path.join(root, "lib")):
+            for item in os.listdir(os.path.join(root, "lib")):
+                if item.startswith("python"):
+                    sp = os.path.join(root, "lib", item, "site-packages")
+                    if os.path.exists(sp):
+                        site_pkgs = sp
+                        break
+                        
+        if os.path.exists(site_pkgs):
+            try:
+                for pkg_dir in os.listdir(site_pkgs):
+                    full_pkg = os.path.join(site_pkgs, pkg_dir)
+                    if os.path.isdir(full_pkg):
+                        for sub in ["", "bin"]:
+                            target = os.path.join(full_pkg, sub) if sub else full_pkg
+                            if os.path.exists(target):
+                                for name in names:
+                                    path = os.path.join(target, name)
+                                    if os.path.exists(path) and os.path.isfile(path):
+                                        _HERMETIC_HIP_PATH = path
+                                        return path
+            except Exception: pass
+    return None
+
+def query_nvidia_cuda(kwargs) -> Optional[dict]:
+    if sys.platform == "darwin":
+        return None
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        res = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"], timeout=2, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
+        if res.stdout:
+            data = res.stdout.strip().split('\n')[0].split(',')
+            if len(data) >= 3:
+                return {"type": data[0].strip(), "vram_total": float(data[1].strip()), "vram_free": float(data[2].strip())}
+    except Exception: pass
+    return None
+
+def query_amd_hip(kwargs) -> Optional[dict]:
+    """Isolated AMD HIP telemetry collection using standalone vendored context loops."""
+    hip_path = find_hermetic_hipinfo()
+    if not hip_path:
+        return None
+    try:
+        res = subprocess.run([hip_path], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
+        if res.stdout:
+            total_mb, free_mb, device_names = 0.0, 0.0, []
+            current_name = "AMD HIP Device"
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if ":" in line:
+                    key, val = [s.strip() for s in line.split(":", 1)]
+                    if key == "Name": current_name = val
+                    elif key == "gcnArchName": device_names.append(f"{current_name} [{val}]")
+                    elif key == "memInfo.total": total_mb += float(val.split()[0]) * (1024.0 if "GB" in val else 1.0)
+                    elif key == "memInfo.free": free_mb += float(val.split()[0]) * (1024.0 if "GB" in val else 1.0)
+            if total_mb > 0:
+                unique_names = list(set(device_names)) or [current_name]
+                gpu_type = f"{len(device_names)}x {unique_names[0]}" if len(device_names) > 1 and len(unique_names) == 1 else " + ".join(unique_names)
+                return {"type": gpu_type, "vram_total": total_mb, "vram_free": free_mb}
+    except Exception: pass
+    return None
+
+def query_intel_xpu(kwargs) -> Optional[dict]:
+    """Isolated Intel XPU telemetry collection aligned to setup_pytorch ground truth matrix."""
+    try:
+        if os.name == 'nt':
+            cmd = ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'Intel' -and ($_.Name -match 'Arc' -or $_.Name -match 'Iris' -or $_.Name -match 'Ultra' -or $_.Name -match 'Graphics') } | Select-Object Name, AdapterRAM | ConvertTo-Json -Compress"]
+            res = subprocess.run(cmd, timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
+            if res.stdout:
+                cim_data = json.loads(res.stdout.strip())
+                cim_data = [cim_data] if isinstance(cim_data, dict) else cim_data
+                if cim_data and cim_data[0].get("Name"):
+                    ram_val = float(cim_data[0].get("AdapterRAM", 0))
+                    if ram_val < 0 or ram_val == 4294967295 or ram_val == 2147483647:
+                        ram_val = 8589934592  # Safe 8GB default bound for over-4GB rollover conditions
+                    total_mb = ram_val / (1024 * 1024)
+                    return {"type": cim_data[0]["Name"], "vram_total": total_mb, "vram_free": total_mb * 0.70}
+        else:
+            drm_dir = "/sys/class/drm"
+            if os.path.exists(drm_dir):
+                for card in os.listdir(drm_dir):
+                    if card.startswith("card"):
+                        uevent_path = os.path.join(drm_dir, card, "device", "uevent")
+                        if os.path.exists(uevent_path):
+                            with open(uevent_path, "r", errors="ignore") as f:
+                                content = f.read()
+                            if "DRIVER=i915" in content or "DRIVER=xe" in content:
+                                return {"type": "Intel XPU Graphics (Native)", "vram_total": 4096.0, "vram_free": 2048.0}
+    except Exception: pass
+    return None
+
+def query_apple_metal() -> Optional[dict]:
+    """Isolated Apple Silicon Unified Memory telemetry collection. Starves non-macOS loops instantly."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        res = subprocess.run(["sysctl", "hw.memsize"], timeout=2, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        if res.stdout:
+            total_ram = float(res.stdout.strip().split(' ')[1]) / (1024 * 1024)
+            return {"type": "Apple Metal (Unified)", "vram_total": total_ram, "vram_free": total_ram * 0.75}
+    except Exception: pass
+    return None
+
+
+# ==============================================================================
+# PLATFORM TELEMETRY ORCHESTRATOR
+# ==============================================================================
 class SystemProfiler:
     _cache = {"type": "CPU Native", "vram_total": 0.0, "vram_free": 0.0, "ram_total": 0.0, "ram_free": 0.0}
     _lock = threading.Lock()
@@ -62,51 +187,12 @@ class SystemProfiler:
             return cls._cache.copy()
 
     @classmethod
-    def _find_hipinfo_binary(cls) -> Optional[str]:
-        search_roots = [
-            os.path.join(BASE_DIR, ".venv"),
-            os.path.join(BASE_DIR, "venv"),
-            BASE_DIR
-        ]
-        
-        names = ["hipInfo.exe", "hipinfo.exe", "hipInfo", "hipinfo"] if os.name == 'nt' else ["hipinfo", "hipInfo", "hipinfo.exe", "hipInfo.exe"]
-        
-        for root in search_roots:
-            site_pkgs = os.path.join(root, "Lib", "site-packages")
-            if not os.path.exists(site_pkgs):
-                # POSIX fallback layout structure
-                lib_dir = os.path.join(root, "lib")
-                if os.path.exists(lib_dir):
-                    for item in os.listdir(lib_dir):
-                        if item.startswith("python"):
-                            sp = os.path.join(lib_dir, item, "site-packages")
-                            if os.path.exists(sp):
-                                site_pkgs = sp
-                                break
-            
-            if os.path.exists(site_pkgs):
-                try:
-                    # Shallow iterate over any folder inside site-packages
-                    for pkg_dir in os.listdir(site_pkgs):
-                        full_pkg_path = os.path.join(site_pkgs, pkg_dir)
-                        if os.path.isdir(full_pkg_path):
-                            # Directly target the folder root and its bin/ subdirectory
-                            for sub_rel in ["", "bin"]:
-                                target_folder = os.path.join(full_pkg_path, sub_rel) if sub_rel else full_pkg_path
-                                if os.path.exists(target_folder):
-                                    for name in names:
-                                        bin_path = os.path.join(target_folder, name)
-                                        if os.path.exists(bin_path) and os.path.isfile(bin_path):
-                                            return bin_path
-                except Exception:
-                    pass
-        return None
-
-    @classmethod
     def _run_probe(cls):
+        global _LOCKED_TOPOLOGY
         telemetry = {"type": "CPU Native", "vram_total": 0.0, "vram_free": 0.0, "ram_total": 0.0, "ram_free": 0.0}
         kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW | 0x04000000} if os.name == 'nt' else {}
 
+        # 1. Asynchronous Host System RAM Probe (OS Isolated Paths)
         try:
             if os.name == 'nt':
                 cmd_ram = ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory | ConvertTo-Json -Compress"]
@@ -120,147 +206,71 @@ class SystemProfiler:
                 if res_ram.stdout:
                     total_bytes = float(res_ram.stdout.strip().split(' ')[1])
                     telemetry["ram_total"] = round(total_bytes / (1024 * 1024), 2)
-                    telemetry["ram_free"] = round((total_bytes * 0.50) / (1024 * 1024), 2)
                     res_vm = subprocess.run(["vm_stat"], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
                     if res_vm.stdout:
                         pages_free, pages_inactive, page_size = 0, 0, 4096
                         for line in res_vm.stdout.splitlines():
-                            if "page size of" in line:
-                                page_size = int(line.split()[-2])
-                            elif "Pages free:" in line:
-                                pages_free = int(line.split()[-1].strip('.'))
-                            elif "Pages inactive:" in line:
-                                pages_inactive = int(line.split()[-1].strip('.'))
+                            if "page size of" in line: page_size = int(line.split()[-2])
+                            elif "Pages free:" in line: pages_free = int(line.split()[-1].strip('.'))
+                            elif "Pages inactive:" in line: pages_inactive = int(line.split()[-1].strip('.'))
                         telemetry["ram_free"] = round(((pages_free + pages_inactive) * page_size) / (1024 * 1024), 2)
             else:
                 if os.path.exists("/proc/meminfo"):
-                    with open("/proc/meminfo", "r") as f:
-                        lines = f.readlines()
+                    with open("/proc/meminfo", "r") as f: lines = f.readlines()
                     m_total, m_avail = 0.0, 0.0
                     for line in lines:
-                        if line.startswith("MemTotal:"):
-                            m_total = float(line.split()[1]) / 1024.0
-                        elif line.startswith("MemAvailable:"):
-                            m_avail = float(line.split()[1]) / 1024.0
-                        elif line.startswith("MemFree:") and m_avail == 0.0:
-                            m_avail = float(line.split()[1]) / 1024.0
+                        if line.startswith("MemTotal:"): m_total = float(line.split()[1]) / 1024.0
+                        elif line.startswith("MemAvailable:"): m_avail = float(line.split()[1]) / 1024.0
                     telemetry["ram_total"] = round(m_total, 2)
                     telemetry["ram_free"] = round(m_avail, 2)
-        except Exception:
-            pass
+        except Exception: pass
 
-        try:
-            hip_path = cls._find_hipinfo_binary()
-            if hip_path:
-                res = subprocess.run([hip_path], timeout=5, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
-                hip_out = res.stdout
-                
-                total_mb, free_mb = 0.0, 0.0
-                device_names = []
-                current_name = "AMD HIP Device"
-                
-                if hip_out:
-                    for line in hip_out.splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if ":" in line:
-                            key, val = line.split(":", 1)
-                            key = key.strip()
-                            val = val.strip()
-                            if key == "Name":
-                                current_name = val
-                            elif key == "gcnArchName":
-                                device_names.append(f"{current_name} [{val}]")
-                            elif key == "memInfo.total":
-                                v_parts = val.split()
-                                if v_parts:
-                                    total_mb += float(v_parts[0]) * 1024.0 if "GB" in val else float(v_parts[0])
-                            elif key == "memInfo.free":
-                                v_parts = val.split()
-                                if v_parts:
-                                    free_mb += float(v_parts[0]) * 1024.0 if "GB" in val else float(v_parts[0])
-                    
-                    if total_mb > 0:
-                        if not device_names and current_name:
-                            device_names.append(current_name)
-                        unique_names = list(set(device_names))
-                        if len(device_names) > 1 and len(unique_names) == 1:
-                            telemetry["type"] = f"{len(device_names)}x {unique_names[0]}"
-                        else:
-                            telemetry["type"] = " + ".join(unique_names) if unique_names else "AMD HIP (Native SDK)"
-                        telemetry["vram_total"] = total_mb
-                        telemetry["vram_free"] = free_mb
-                        with cls._lock:
-                            cls._cache = telemetry
-                        return
-
-            try:
-                res = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
-                if res.stdout:
-                    data = res.stdout.strip().split('\n')[0].split(',')
-                    if len(data) >= 3:
-                        telemetry["type"] = data[0].strip()
-                        telemetry["vram_total"] = float(data[1].strip())
-                        telemetry["vram_free"] = float(data[2].strip())
-                        with cls._lock:
-                            cls._cache = telemetry
-                        return
-            except: pass
-
-            if sys.platform == "linux":
-                try:
-                    res = subprocess.run(["rocm-smi", "--showmeminfo", "vram", "--json"], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
-                    if res.stdout:
-                        data = json.loads(res.stdout)
-                        total_b, used_b = 0.0, 0.0
-                        for card, info in data.items():
-                            if isinstance(info, dict) and "VRAM Total Memory (B)" in info:
-                                total_b += float(info.get("VRAM Total Memory (B)", 0))
-                                used_b += float(info.get("VRAM Used Memory (B)", info.get("VRAM Total Used Memory (B)", 0)))
-                        if total_b > 0:
-                            telemetry["type"] = "ROCm / AMD HIP"
-                            telemetry["vram_total"] = total_b / (1024 * 1024)
-                            telemetry["vram_free"] = (total_b - used_b) / (1024 * 1024)
-                            with cls._lock:
-                                cls._cache = telemetry
-                            return
-                except: pass
-
-            if sys.platform == "darwin":
-                try:
-                    res = subprocess.run(["sysctl", "hw.memsize"], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-                    if res.stdout:
-                        total_ram = float(res.stdout.strip().split(' ')[1]) / (1024 * 1024)
-                        telemetry["type"] = "Apple Metal (Unified)"
-                        telemetry["vram_total"] = total_ram
-                        telemetry["vram_free"] = total_ram * 0.75
-                        with cls._lock:
-                            cls._cache = telemetry
-                        return
-                except: pass
-
-            if os.name == 'nt':
-                try:
-                    cmd = ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM | ConvertTo-Json -Compress"]
-                    res = subprocess.run(cmd, timeout=4, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
-                    if res.stdout:
-                        cim_data = json.loads(res.stdout.strip())
-                        cim_data = [cim_data] if isinstance(cim_data, dict) else cim_data
-                        total_vram = sum(float(g.get("AdapterRAM", 0)) / (1024 * 1024) for g in cim_data if g.get("AdapterRAM"))
-                        name = cim_data[0].get("Name", "Intel / DirectX") if cim_data else "Intel / DirectX"
-                        if total_vram > 0:
-                            telemetry["type"] = name
-                            telemetry["vram_total"] = total_vram
-                            telemetry["vram_free"] = total_vram * 0.85
-                            with cls._lock:
-                                cls._cache = telemetry
-                            return
-                except: pass
-
-        except Exception:
-            pass
+        # 2. Stateful Compute Evaluation and Pinned Execution
+        if _LOCKED_TOPOLOGY is not None:
+            if _LOCKED_TOPOLOGY == "NVIDIA_CUDA":
+                gpu_data = query_nvidia_cuda(kwargs)
+            elif _LOCKED_TOPOLOGY == "AMD_HIP":
+                gpu_data = query_amd_hip(kwargs)
+            elif _LOCKED_TOPOLOGY == "INTEL_XPU":
+                gpu_data = query_intel_xpu(kwargs)
+            elif _LOCKED_TOPOLOGY == "APPLE_METAL":
+                gpu_data = query_apple_metal()
+            else:
+                gpu_data = None
             
+            if gpu_data:
+                telemetry.update(gpu_data)
+        else:
+            # Cold boot discovery sequence: Locks system hardware pathing exactly once
+            gpu_data = query_nvidia_cuda(kwargs)
+            if gpu_data:
+                _LOCKED_TOPOLOGY = "NVIDIA_CUDA"
+                telemetry.update(gpu_data)
+                ui_log = "NVIDIA CUDA"
+            else:
+                gpu_data = query_amd_hip(kwargs)
+                if gpu_data:
+                    _LOCKED_TOPOLOGY = "AMD_HIP"
+                    telemetry.update(gpu_data)
+                    ui_log = "AMD HIP"
+                else:
+                    gpu_data = query_intel_xpu(kwargs)
+                    if gpu_data:
+                        _LOCKED_TOPOLOGY = "INTEL_XPU"
+                        telemetry.update(gpu_data)
+                        ui_log = "Intel XPU"
+                    else:
+                        gpu_data = query_apple_metal()
+                        if gpu_data:
+                            _LOCKED_TOPOLOGY = "APPLE_METAL"
+                            telemetry.update(gpu_data)
+                            ui_log = "Apple Metal"
+                        else:
+                            _LOCKED_TOPOLOGY = "CPU_NATIVE"
+                            ui_log = "CPU Native"
+                            
+            sys.stdout.write(f"\033[95m[TOPOLOGY] Compute Graph Locked to: {ui_log}\033[0m\n")
+
         with cls._lock:
             cls._cache = telemetry
 
