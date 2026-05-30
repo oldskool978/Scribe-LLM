@@ -63,15 +63,43 @@ class SystemProfiler:
 
     @classmethod
     def _find_hipinfo_binary(cls) -> Optional[str]:
-        for name in ["hipinfo", "hipInfo", "hipinfo.exe", "hipInfo.exe"]:
-            path = shutil.which(name)
-            if path:
-                return path
-        for sub_dir, ext in [("Scripts", ".exe"), ("Scripts", ""), ("bin", ""), ("bin", ".exe")]:
-            for name in ["hipinfo", "hipInfo"]:
-                path = os.path.join(sys.prefix, sub_dir, f"{name}{ext}")
-                if os.path.exists(path):
-                    return path
+        search_roots = [
+            os.path.join(BASE_DIR, ".venv"),
+            os.path.join(BASE_DIR, "venv"),
+            BASE_DIR
+        ]
+        
+        names = ["hipInfo.exe", "hipinfo.exe", "hipInfo", "hipinfo"] if os.name == 'nt' else ["hipinfo", "hipInfo", "hipinfo.exe", "hipInfo.exe"]
+        
+        for root in search_roots:
+            site_pkgs = os.path.join(root, "Lib", "site-packages")
+            if not os.path.exists(site_pkgs):
+                # POSIX fallback layout structure
+                lib_dir = os.path.join(root, "lib")
+                if os.path.exists(lib_dir):
+                    for item in os.listdir(lib_dir):
+                        if item.startswith("python"):
+                            sp = os.path.join(lib_dir, item, "site-packages")
+                            if os.path.exists(sp):
+                                site_pkgs = sp
+                                break
+            
+            if os.path.exists(site_pkgs):
+                try:
+                    # Shallow iterate over any folder inside site-packages
+                    for pkg_dir in os.listdir(site_pkgs):
+                        full_pkg_path = os.path.join(site_pkgs, pkg_dir)
+                        if os.path.isdir(full_pkg_path):
+                            # Directly target the folder root and its bin/ subdirectory
+                            for sub_rel in ["", "bin"]:
+                                target_folder = os.path.join(full_pkg_path, sub_rel) if sub_rel else full_pkg_path
+                                if os.path.exists(target_folder):
+                                    for name in names:
+                                        bin_path = os.path.join(target_folder, name)
+                                        if os.path.exists(bin_path) and os.path.isfile(bin_path):
+                                            return bin_path
+                except Exception:
+                    pass
         return None
 
     @classmethod
