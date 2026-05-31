@@ -10,14 +10,13 @@ class ScribeCompositor {
         this.mathRenderCache = new Map();
         this.messageCount = 0;
 
-        // Optimized ResizeObserver with requestAnimationFrame batch tracking to prevent layout thrashing
         this.editorObserver = new ResizeObserver((entries) => {
             window.requestAnimationFrame(() => {
                 for (let i = 0; i < entries.length; i++) {
                     const editorId = entries[i].target.dataset.editorId;
                     if (editorId && this.editorPool.has(editorId)) {
                         const editor = this.editorPool.get(editorId);
-                        if (editor) editor.resize();
+                        if (editor) editor.renderer.onResize(true);
                     }
                 }
             });
@@ -32,8 +31,8 @@ class ScribeCompositor {
         if (window.ace && window.ace.config) {
             window.ace.config.set('basePath', 'lib/ace/');
             window.ace.config.set('workerPath', 'lib/ace/');
-            // Pre-hydrate language extensions immediately to register global autocompleters
             window.ace.config.loadModule("ace/ext/language_tools");
+            window.ace.config.loadModule("ace/ext/modelist");
         }
     }
 
@@ -101,12 +100,22 @@ class ScribeCompositor {
         const targetLang = aiQuirks[normalized] || normalized;
 
         if (window.ace && window.ace.require) {
-            const modelist = window.ace.require("ace/ext/modelist");
-            if (modelist) {
-                if (modelist.modesByName[targetLang]) return modelist.modesByName[targetLang].mode;
-                const resolvedMode = modelist.getModeForPath(`virtual_file.${targetLang}`);
-                if (resolvedMode && resolvedMode.name !== "text") return resolvedMode.mode;
-            }
+            try {
+                const modelist = window.ace.require("ace/ext/modelist");
+                if (modelist) {
+                    if (modelist.modesByName[targetLang]) {
+                        return modelist.modesByName[targetLang].mode;
+                    }
+                    const resolvedMode = modelist.getModeForPath(`virtual_file.${targetLang}`);
+                    if (resolvedMode && resolvedMode.name !== "text") {
+                        return resolvedMode.mode;
+                    }
+                }
+            } catch (e) {}
+        }
+        
+        if (/^[a-z0-9_-]+$/.test(targetLang)) {
+            return `ace/mode/${targetLang}`;
         }
         return "ace/mode/text";
     }
@@ -488,7 +497,6 @@ class ScribeCompositor {
         let editor;
         let editorId;
         
-        // Idempotent resolution checks to safely protect active elements from collisions
         if (typeof editorElementOrId === 'string') {
             editorId = editorElementOrId;
         } else {
@@ -496,7 +504,6 @@ class ScribeCompositor {
             if (!editorElementOrId.id) editorElementOrId.id = editorId;
         }
 
-        // Cache verification pattern intercepts redundant window instantiation operations
         if (this.editorPool.has(editorId)) {
             editor = this.editorPool.get(editorId);
         } else {
@@ -510,7 +517,6 @@ class ScribeCompositor {
         const aceModePath = this._resolveAceMode(extOrLang);
         editor.session.setMode(aceModePath);
 
-        // Core local background syntax worker profiles to block unsupported 404 network crashes
         const activeModeName = aceModePath.split('/').pop();
         const locallySupportedWorkers = ['javascript', 'json', 'yaml', 'html', 'css', 'php', 'lua', 'xml', 'xquery', 'coffee'];
         
@@ -519,7 +525,7 @@ class ScribeCompositor {
             if (locallySupportedWorkers.includes(activeModeName)) {
                 shouldUseWorker = true;
             } else if (activeModeName === 'jsx') {
-                shouldUseWorker = true; // Fallback route onto standard javascript workers
+                shouldUseWorker = true;
             }
         }
 
@@ -538,7 +544,7 @@ class ScribeCompositor {
             displayIndentGuides: true,
             highlightGutterLine: true,
             scrollPastEnd: 0.1,
-            readOnly: false, // Unlocked globally to hook live autocompleters on target inputs
+            readOnly: false,
             enableBasicAutocompletion: true,
             enableLiveAutocompletion: true,
             enableSnippets: true,
@@ -554,6 +560,18 @@ class ScribeCompositor {
             editor.setValue(content || '', 1);
         }
         editor.clearSelection();
+
+        if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(() => {
+                if (this.editorPool.has(editorId)) {
+                    this.editorPool.get(editorId).renderer.onResize(true);
+                }
+            });
+        }
+        
+        window.requestAnimationFrame(() => {
+            editor.renderer.onResize(true);
+        });
 
         if (wrapper && !this.observedNodes.has(editorId)) {
             this.editorObserver.observe(wrapper);
@@ -908,6 +926,7 @@ class ScribeCompositor {
                                 editor.session.setScrollTop(scrollPos);
                             }
                             editor.clearSelection();
+                            editor.renderer.onResize(true);
                         }
                     }
                 }
@@ -978,7 +997,7 @@ class ScribeCompositor {
                 if (block.type === 'artifact' && nodeObj.wrapper.dataset.aceInjected === "true") {
                     const editorId = nodeObj.wrapper.dataset.editorId;
                     if (this.editorPool.has(editorId)) {
-                        this.editorPool.get(editorId).resize();
+                        this.editorPool.get(editorId).renderer.onResize(true);
                     }
                 }
             }
