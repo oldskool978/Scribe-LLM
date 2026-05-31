@@ -403,11 +403,67 @@ class EngineDispatcher:
     def list_models(self) -> List[str]: return [f for f in os.listdir(MODELS_DIR) if f.endswith(".gguf")]
     
     def _find_mmproj(self, model_name: str) -> Optional[str]:
-        ggufs = self.list_models()
-        for f in ggufs:
-            if "mmproj" in f.lower() and model_name.lower().split('-')[0] in f.lower(): return os.path.join(MODELS_DIR, f)
-        mmprojs = [f for f in ggufs if "mmproj" in f.lower()]
-        return os.path.join(MODELS_DIR, mmprojs[0]) if len(mmprojs) == 1 else None
+        """
+        Pure primitive left-to-right character sweep. Relies entirely on natural 
+        score accumulation. True 0 occurs naturally on zero prefix alignment.
+        """
+        model_low = model_name.lower().replace(".gguf", "")
+        if "mmproj" in model_low:
+            return None
+
+        all_files = self.list_models()
+        best_projector = None
+        best_current_score = 0
+
+        for f in all_files:
+            f_low = f.lower()
+            if "mmproj" not in f_low:
+                continue
+
+            proj_base = f_low.split("mmproj")[0].rstrip("-_ .")
+            if not proj_base:
+                continue
+
+            current_model_score = 0
+            for c1, c2 in zip(model_low, proj_base):
+                if c1 == c2:
+                    current_model_score += 1
+                else:
+                    break
+
+            if current_model_score == 0:
+                continue
+
+            has_superior_claim = False
+            for workspace_file in all_files:
+                if workspace_file == model_name or "mmproj" in workspace_file.lower():
+                    continue
+                
+                wf_low = workspace_file.lower().replace(".gguf", "")
+                
+                other_score = 0
+                for c1, c2 in zip(wf_low, proj_base):
+                    if c1 == c2:
+                        other_score += 1
+                    else:
+                        break
+                
+                if other_score > current_model_score:
+                    has_superior_claim = True
+                    break
+
+            if has_superior_claim:
+                continue
+
+            if current_model_score > best_current_score:
+                best_current_score = current_model_score
+                best_projector = f
+
+        if best_projector:
+            sys.stdout.write(f"\033[92m[VISION] Match assigned: {best_projector} (Prefix Score: {best_current_score})\033[0m\n")
+            return os.path.join(MODELS_DIR, best_projector)
+
+        return None
 
     def _find_draft_model(self, model_name: str) -> Optional[str]:
         ggufs = self.list_models()
