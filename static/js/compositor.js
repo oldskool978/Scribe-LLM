@@ -10,15 +10,16 @@ class ScribeCompositor {
         this.mathRenderCache = new Map();
         this.messageCount = 0;
 
+        // Optimized ResizeObserver with requestAnimationFrame batch tracking to prevent layout thrashing
         this.editorObserver = new ResizeObserver((entries) => {
             window.requestAnimationFrame(() => {
-                entries.forEach(entry => {
-                    const editorId = entry.target.dataset.editorId;
+                for (let i = 0; i < entries.length; i++) {
+                    const editorId = entries[i].target.dataset.editorId;
                     if (editorId && this.editorPool.has(editorId)) {
                         const editor = this.editorPool.get(editorId);
                         if (editor) editor.resize();
                     }
-                });
+                }
             });
         });
 
@@ -31,6 +32,8 @@ class ScribeCompositor {
         if (window.ace && window.ace.config) {
             window.ace.config.set('basePath', 'lib/ace/');
             window.ace.config.set('workerPath', 'lib/ace/');
+            // Pre-hydrate language extensions immediately to register global autocompleters
+            window.ace.config.loadModule("ace/ext/language_tools");
         }
     }
 
@@ -39,11 +42,27 @@ class ScribeCompositor {
         const style = document.createElement('style');
         style.id = 'scribe-compositor-styles';
         style.textContent = `
-            .scribe-math-block { display: block; margin: 1em 0; text-align: center; width: 100%; overflow-x: auto; overflow-y: hidden; }
+            .scribe-math-block { display: block; margin: 1.5em 0; text-align: center; width: 100%; overflow-x: auto; overflow-y: hidden; }
             .scribe-math-block-display-override { display: block; margin: 1em 0; text-align: center; width: 100%; overflow-x: auto; overflow-y: hidden; }
             .scribe-math-inline { display: inline; }
             .scribe-text-block, .scribe-thought-block { width: 100%; }
-            .scribe-ace-wrapper { position: relative; width: 100%; margin: 1em 0; }
+            .scribe-artifact-native { width: 100%; padding: 1.25em; background: rgba(10, 10, 15, 0.6); border: 1px solid rgba(0, 255, 163, 0.15); border-radius: 8px; margin: 1.25em 0; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; }
+            .scribe-ace-wrapper { position: relative; width: 100%; margin: 1.25em 0; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); background: #0d0d11; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35); }
+            .scribe-ace-editor { width: 100%; }
+            .scribe-math-raw { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: var(--text-muted); opacity: 0.8; white-space: pre-wrap; }
+            
+            .node-content details[data-block-type="think"] { background: rgba(7, 7, 10, 0.85); border-left: 3px solid #4f46e5; border-radius: 4px; padding: 1em; margin: 1em 0; box-shadow: inset 0 0 16px rgba(0,0,0,0.6); }
+            .node-content details[data-block-type="think"] .thought-header { color: #818cf8; font-weight: 600; font-family: ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85em; cursor: pointer; user-select: none; }
+            .node-content details[data-block-type="think"] .thought-content { margin-top: 0.75em; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.75em; color: rgba(255,255,255,0.7); font-style: italic; }
+            
+            .node-content details.rlm-exec-block { background: rgba(5, 15, 10, 0.75); border-left: 3px solid #00ffa3; border-radius: 4px; padding: 1em; margin: 1em 0; }
+            .node-content details.rlm-exec-block .rlm-header { color: #00ffa3; font-weight: 600; font-family: ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85em; cursor: pointer; }
+            
+            .node-content details.rlm-result-block { background: rgba(10, 10, 20, 0.75); border-left: 3px solid #00bfff; border-radius: 4px; padding: 1em; margin: 1em 0; }
+            .node-content details.rlm-result-block .rlm-result-header { color: #00bfff; font-weight: 600; font-family: ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85em; cursor: pointer; }
+            
+            .scribe-status-badge.resolved { display: inline-flex; align-items: center; background: rgba(0, 255, 163, 0.1); border: 1px solid rgba(0, 255, 163, 0.3); color: #00ffa3; padding: 0.4em 1em; border-radius: 20px; font-size: 0.8em; font-family: ui-monospace, monospace; font-weight: 600; margin: 0.75em 0; letter-spacing: 0.02em; box-shadow: 0 0 12px rgba(0, 255, 163, 0.1); }
+            .scribe-winner { background: rgba(255, 199, 0, 0.08); border: 1px dashed rgba(255, 199, 0, 0.3); padding: 1em; border-radius: 6px; color: #ffc700; margin: 1em 0; font-family: ui-monospace, monospace; font-size: 0.9em; }
         `;
         document.head.appendChild(style);
     }
@@ -66,334 +85,503 @@ class ScribeCompositor {
             .replace(/'/g, "&#039;");
     }
 
-    _lexicalStreamParse(text) {
+    _resolveAceMode(langHint) {
+        if (!langHint) return "ace/mode/text";
+        
+        const normalized = langHint.toLowerCase().trim();
+        const aiQuirks = {
+            'react': 'jsx', 'reactjs': 'jsx', 'vue3': 'vue', 'vue2': 'vue',
+            'bash': 'sh', 'shell': 'sh', 'zsh': 'sh', 'c++': 'c_cpp', 'cpp': 'c_cpp', 'c': 'c_cpp',
+            'c#': 'csharp', 'cs': 'csharp', 'f#': 'fsharp', 'fs': 'fsharp',
+            'go': 'golang', 'rs': 'rust', 'rb': 'ruby', 'py': 'python',
+            'js': 'javascript', 'ts': 'typescript', 'yml': 'yaml',
+            'docker': 'dockerfile', 'node': 'javascript', 'md': 'markdown'
+        };
+
+        const targetLang = aiQuirks[normalized] || normalized;
+
+        if (window.ace && window.ace.require) {
+            const modelist = window.ace.require("ace/ext/modelist");
+            if (modelist) {
+                if (modelist.modesByName[targetLang]) return modelist.modesByName[targetLang].mode;
+                const resolvedMode = modelist.getModeForPath(`virtual_file.${targetLang}`);
+                if (resolvedMode && resolvedMode.name !== "text") return resolvedMode.mode;
+            }
+        }
+        return "ace/mode/text";
+    }
+
+    _isEscaped(text, currentIndex) {
+        let backslashCount = 0;
+        let j = currentIndex - 1;
+        while (j >= 0 && text[j] === '\\') {
+            backslashCount++;
+            j--;
+        }
+        return (backslashCount % 2 !== 0); 
+    }
+
+    _healKaTeX(tex) {
+        if (!tex) return tex;
+        let healed = tex.replace(/(^|[^\\])%(?![0-9a-fA-F]{2})/g, '$1\\%');
+
+        healed = healed.replace(/\\begin\{align\}/g, '\\begin{aligned}')
+                       .replace(/\\end\{align\}/g, '\\end{aligned}')
+                       .replace(/\\begin\{align\*\}/g, '\\begin{aligned}')
+                       .replace(/\\end\{align\*\}/g, '\\end{aligned}')
+                       .replace(/\\begin\{equation\}/g, '\\begin{aligned}')
+                       .replace(/\\end\{equation\}/g, '\\end{aligned}')
+                       .replace(/\\begin\{equation\*\}/g, '\\begin{aligned}')
+                       .replace(/\\end\{equation\*\}/g, '\\end{aligned}')
+                       .replace(/\\begin\{eqnarray\}/g, '\\begin{aligned}')
+                       .replace(/\\end\{eqnarray\}/g, '\\end{aligned}')
+                       .replace(/\\begin\{eqnarray\*\}/g, '\\begin{aligned}')
+                       .replace(/\\end\{eqnarray\*\}/g, '\\end{aligned}');
+                  
+        return healed;
+    }
+
+    _unifiedParseAndIsolate(text) {
         const blocks = [];
+        const mathRegistry = [];
         let i = 0;
         const len = text.length;
         
-        let currentState = 'text'; 
-        let currentAttr = '';
-        let currentBlockContent = '';
+        const stack = [{ type: 'text', content: '', attributes: '' }];
         
+        let mathState = 'none'; 
+        let currentMathBuffer = "";
+        let activeEnvName = "";
+        let braceDepth = 0;
+
         let inCodeFence = false;
+        let activeFenceLength = 0;
         let inInlineCode = false;
-        
+        let activeInlineLength = 0;
+
         const targetTags = ['think', 'rlm_exec', 'rlm_result', 'status', 'candidate', 'evaluation', 'winner', 'artifact'];
-        
+
+        const flushMath = (mode, tex) => {
+            if (!tex) return;
+            const idx = mathRegistry.length;
+            let b64 = "";
+            try { b64 = btoa(encodeURIComponent(tex)); } 
+            catch (e) { b64 = btoa(encodeURIComponent("$\\text{Stream Formatting...}$")); }
+            
+            mathRegistry.push({ type: mode, b64: b64, tex: tex });
+            const token = mode === 'block' ? `\n\nSCRIBEMATHBLOCKX${idx}X\n\n` : `SCRIBEMATHINLINEX${idx}X`;
+            stack[stack.length - 1].content += token;
+        };
+
         while (i < len) {
-            if (currentState === 'text') {
-                if (text.startsWith('```', i)) {
-                    inCodeFence = !inCodeFence;
-                    currentBlockContent += '```';
-                    i += 3;
+            const currentContext = stack[stack.length - 1];
+            const isEscapedToken = this._isEscaped(text, i);
+
+            let tickCount = 0;
+            let j = i;
+            while (j < len && text[j] === '`') {
+                tickCount++;
+                j++;
+            }
+
+            if (tickCount > 0 && !isEscapedToken) {
+                if (mathState === 'none') {
+                    if (!inCodeFence && !inInlineCode) {
+                        if (tickCount >= 3) {
+                            inCodeFence = true; activeFenceLength = tickCount;
+                        } else {
+                            inInlineCode = true; activeInlineLength = tickCount;
+                        }
+                        currentContext.content += text.substring(i, j); i = j; continue;
+                    } else if (inCodeFence && tickCount >= activeFenceLength) {
+                        inCodeFence = false; activeFenceLength = 0;
+                        currentContext.content += text.substring(i, j); i = j; continue;
+                    } else if (inInlineCode && tickCount === activeInlineLength) {
+                        inInlineCode = false; activeInlineLength = 0;
+                        currentContext.content += text.substring(i, j); i = j; continue;
+                    }
+                } else {
+                    currentMathBuffer += text.substring(i, j); i = j; continue;
+                }
+                currentContext.content += text.substring(i, j); i = j; continue;
+            }
+
+            let tagMatched = false;
+            
+            if (currentContext.type !== 'text') {
+                const closeTag = `</${currentContext.type}>`;
+                if (text.startsWith(closeTag, i)) {
+                    if (mathState !== 'none') {
+                        const isBlock = (mathState === 'block_dollar' || mathState === 'block_bracket' || mathState === 'env');
+                        flushMath(isBlock ? 'block' : 'inline', currentMathBuffer);
+                        mathState = 'none'; currentMathBuffer = ""; braceDepth = 0;
+                    }
+                    if (inCodeFence) {
+                        currentContext.content += '\n```\n';
+                        inCodeFence = false; activeFenceLength = 0;
+                    }
+                    if (inInlineCode) {
+                        currentContext.content += '`';
+                        inInlineCode = false; activeInlineLength = 0;
+                    }
+
+                    blocks.push({
+                        type: currentContext.type,
+                        content: currentContext.content,
+                        attributes: currentContext.attributes,
+                        isComplete: true
+                    });
+                    stack.pop();
+                    i += closeTag.length;
                     continue;
                 }
-                if (!inCodeFence && text[i] === '`') {
-                    inInlineCode = !inInlineCode;
-                    currentBlockContent += '`';
-                    i++;
-                    continue;
-                }
-                
-                if (!inCodeFence && !inInlineCode && text[i] === '<' && text[i + 1] !== '/') {
+            }
+
+            if (mathState === 'none' && !inCodeFence && !inInlineCode) {
+                if (text[i] === '<' && text[i + 1] !== '/') {
                     let matchedTag = null;
-                    for (const tag of targetTags) {
+                    for (let t = 0; t < targetTags.length; t++) {
+                        const tag = targetTags[t];
                         if (text.startsWith(tag, i + 1)) {
                             const nextChar = text[i + 1 + tag.length];
                             if (nextChar === '>' || nextChar === ' ' || nextChar === '\t' || nextChar === '\n' || nextChar === '\r') {
-                                matchedTag = tag;
-                                break;
+                                matchedTag = tag; break;
                             }
                         }
                     }
                     
                     if (matchedTag) {
-                        if (currentBlockContent) {
-                            blocks.push({ type: 'text', content: currentBlockContent, isComplete: true });
-                            currentBlockContent = '';
-                        }
-                        
                         const attrStart = i + 1 + matchedTag.length;
                         let tagEndIndex = -1;
                         let inQuote = null;
                         
-                        for (let j = attrStart; j < len; j++) {
-                            const c = text[j];
+                        for (let k = attrStart; k < len; k++) {
+                            const c = text[k];
                             if (c === '"' || c === "'") {
                                 if (!inQuote) inQuote = c;
                                 else if (inQuote === c) inQuote = null;
                             } else if (c === '>' && !inQuote) {
-                                tagEndIndex = j;
-                                break;
+                                tagEndIndex = k; break;
                             }
                         }
                         
                         if (tagEndIndex !== -1) {
-                            currentAttr = text.substring(attrStart, tagEndIndex).trim();
-                            currentState = matchedTag;
-                            i = tagEndIndex + 1;
-                            continue;
-                        }
-                    }
-                }
-                
-                currentBlockContent += text[i];
-                i++;
-            } else {
-                if (text.startsWith('```', i)) {
-                    inCodeFence = !inCodeFence;
-                    currentBlockContent += '```';
-                    i += 3;
-                    continue;
-                }
-                if (!inCodeFence && text[i] === '`') {
-                    inInlineCode = !inInlineCode;
-                    currentBlockContent += '`';
-                    i++;
-                    continue;
-                }
+                            if (mathState !== 'none') {
+                                const isBlock = (mathState === 'block_dollar' || mathState === 'block_bracket' || mathState === 'env');
+                                flushMath(isBlock ? 'block' : 'inline', currentMathBuffer);
+                                mathState = 'none'; currentMathBuffer = ""; braceDepth = 0;
+                            }
 
-                const closeTag = `</${currentState}>`;
-                if (!inCodeFence && !inInlineCode && text.startsWith(closeTag, i)) {
-                    blocks.push({
-                        type: currentState,
-                        content: currentBlockContent,
-                        attributes: currentAttr,
-                        isComplete: true
-                    });
-                    currentBlockContent = '';
-                    currentAttr = '';
-                    currentState = 'text';
-                    i += closeTag.length;
-                    continue;
-                }
-                
-                if (!inCodeFence && !inInlineCode && text[i] === '<' && text[i + 1] !== '/') {
-                    let matchedTag = null;
-                    for (const tag of targetTags) {
-                        if (text.startsWith(tag, i + 1)) {
-                            const nextChar = text[i + 1 + tag.length];
-                            if (nextChar === '>' || nextChar === ' ' || nextChar === '\t' || nextChar === '\n' || nextChar === '\r') {
-                                matchedTag = tag;
-                                break;
+                            if (currentContext.content) {
+                                blocks.push({
+                                    type: currentContext.type,
+                                    content: currentContext.content,
+                                    attributes: currentContext.attributes,
+                                    isComplete: true 
+                                });
+                                currentContext.content = ''; 
                             }
-                        }
-                    }
-                    
-                    if (matchedTag && matchedTag !== currentState) {
-                        blocks.push({
-                            type: currentState,
-                            content: currentBlockContent,
-                            attributes: currentAttr,
-                            isComplete: true
-                        });
-                        currentBlockContent = '';
-                        currentAttr = '';
-                        
-                        const attrStart = i + 1 + matchedTag.length;
-                        let tagEndIndex = -1;
-                        let inQuote = null;
-                        
-                        for (let j = attrStart; j < len; j++) {
-                            const c = text[j];
-                            if (c === '"' || c === "'") {
-                                if (!inQuote) inQuote = c;
-                                else if (inQuote === c) inQuote = null;
-                            } else if (c === '>' && !inQuote) {
-                                tagEndIndex = j;
-                                break;
-                            }
-                        }
-                        
-                        if (tagEndIndex !== -1) {
-                            currentAttr = text.substring(attrStart, tagEndIndex).trim();
-                            currentState = matchedTag;
+                            
+                            const newAttr = text.substring(attrStart, tagEndIndex).trim();
+                            stack.push({ type: matchedTag, content: '', attributes: newAttr });
                             i = tagEndIndex + 1;
-                            continue;
+                            tagMatched = true; continue;
                         }
                     }
                 }
-                
-                currentBlockContent += text[i];
-                i++;
+            }
+            if (tagMatched) continue;
+
+            if (!inCodeFence && !inInlineCode) {
+                if (mathState === 'none') {
+                    if (text.startsWith('$$', i) && !isEscapedToken) {
+                        mathState = 'block_dollar'; braceDepth = 0; i += 2; continue;
+                    }
+                    if (text.startsWith('\\[', i) && !isEscapedToken) {
+                        mathState = 'block_bracket'; braceDepth = 0; i += 2; continue;
+                    }
+                    if (text.startsWith('\\(', i) && !isEscapedToken) {
+                        mathState = 'inline_paren'; braceDepth = 0; i += 2; continue;
+                    }
+                    if (text.startsWith('\\begin{', i) && !isEscapedToken) {
+                        const closeBrace = text.indexOf('}', i + 7);
+                        if (closeBrace !== -1) {
+                            const env = text.substring(i + 7, closeBrace);
+                            const mathEnvs = ['align', 'align*', 'equation', 'equation*', 'eqnarray', 'eqnarray*', 'gather', 'gather*', 'CD', 'matrix', 'pmatrix', 'bmatrix', 'Bmatrix', 'vmatrix', 'Vmatrix', 'cases', 'rcases'];
+                            if (mathEnvs.includes(env)) {
+                                mathState = 'env'; braceDepth = 0; activeEnvName = env;
+                                currentMathBuffer = text.substring(i, closeBrace + 1);
+                                i = closeBrace + 1; continue;
+                            }
+                        }
+                    }
+                    if (text[i] === '$' && !isEscapedToken) {
+                        if (i + 1 < len && !/^\d/.test(text[i+1]) && text[i+1] !== ' ') {
+                            mathState = 'inline_dollar'; braceDepth = 0; i++; continue;
+                        }
+                    }
+                } else {
+                    if (text[i] === '{' && !isEscapedToken) { braceDepth++; currentMathBuffer += text[i]; i++; continue; }
+                    if (text[i] === '}' && !isEscapedToken) { braceDepth = Math.max(0, braceDepth - 1); currentMathBuffer += text[i]; i++; continue; }
+
+                    if (mathState === 'block_dollar') {
+                        if (text.startsWith('$$', i) && !isEscapedToken && braceDepth === 0) {
+                            flushMath('block', currentMathBuffer); currentMathBuffer = "";
+                            mathState = 'none'; i += 2; continue;
+                        }
+                        currentMathBuffer += text[i]; i++; continue;
+                    }
+                    else if (mathState === 'block_bracket') {
+                        if (text.startsWith('\\]', i) && !isEscapedToken && braceDepth === 0) {
+                            flushMath('block', currentMathBuffer); currentMathBuffer = "";
+                            mathState = 'none'; i += 2; continue;
+                        }
+                        currentMathBuffer += text[i]; i++; continue;
+                    }
+                    else if (mathState === 'inline_paren') {
+                        if (text[i] === '\n' && text.substring(i).match(/^\n\s*\n/) && braceDepth === 0) {
+                            currentContext.content += '\\(' + currentMathBuffer + '\n'; currentMathBuffer = "";
+                            mathState = 'none'; i++; continue;
+                        }
+                        if (text.startsWith('\\)', i) && !isEscapedToken && braceDepth === 0) {
+                            flushMath('inline', currentMathBuffer); currentMathBuffer = "";
+                            mathState = 'none'; i += 2; continue;
+                        }
+                        currentMathBuffer += text[i]; i++; continue;
+                    }
+                    else if (mathState === 'inline_dollar') {
+                        if (text.startsWith('$$', i) && !isEscapedToken && braceDepth === 0) {
+                            currentContext.content += '$' + currentMathBuffer; currentMathBuffer = "";
+                            mathState = 'block_dollar'; braceDepth = 0; i += 2; continue;
+                        }
+                        if (text[i] === '\n' && text.substring(i).match(/^\n\s*\n/) && braceDepth === 0) {
+                            currentContext.content += '$' + currentMathBuffer + '\n'; currentMathBuffer = "";
+                            mathState = 'none'; i++; continue;
+                        }
+                        if (text[i] === '$' && !isEscapedToken && braceDepth === 0) {
+                            flushMath('inline', currentMathBuffer); currentMathBuffer = "";
+                            mathState = 'none'; i++; continue;
+                        }
+                        currentMathBuffer += text[i]; i++; continue;
+                    }
+                    else if (mathState === 'env') {
+                        const closeTag = `\\end{${activeEnvName}}`;
+                        if (text.startsWith(closeTag, i) && !isEscapedToken && braceDepth === 0) {
+                            currentMathBuffer += closeTag;
+                            flushMath('block', currentMathBuffer); currentMathBuffer = "";
+                            mathState = 'none'; activeEnvName = ""; i += closeTag.length; continue;
+                        }
+                        currentMathBuffer += text[i]; i++; continue;
+                    }
+                }
+            }
+
+            if (mathState === 'none') {
+                currentContext.content += text[i];
+            }
+            i++;
+        }
+
+        if (mathState !== 'none') {
+            const isBlock = (mathState === 'block_dollar' || mathState === 'block_bracket' || mathState === 'env');
+            flushMath(isBlock ? 'block' : 'inline', currentMathBuffer);
+        }
+
+        for (let k = 0; k < stack.length; k++) {
+            const ctx = stack[k];
+            if (ctx.content || ctx.type !== 'text') {
+                blocks.push({
+                    type: ctx.type,
+                    content: ctx.content,
+                    attributes: ctx.attributes,
+                    isComplete: false
+                });
             }
         }
-        
-        if (currentBlockContent || currentState !== 'text') {
+
+        if (blocks.length === 0) {
             blocks.push({
-                type: currentState,
-                content: currentBlockContent,
-                attributes: currentAttr,
-                isComplete: false
+                type: 'text',
+                content: '',
+                attributes: '',
+                isComplete: true
             });
         }
-        
-        return blocks;
+
+        return { blocks, registry: mathRegistry };
     }
 
-    _isolateAndPreprocessMath(text) {
-        const mathRegistry = [];
-        let output = text;
-
-        output = output.replace(/\$\$([\s\S]*?)\$\$/g, (match, tex) => {
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'block', tex: tex });
-            return `SCRIBEMATHBLOCKX${idx}X`;
-        });
-
-        output = output.replace(/\\\[([\s\S]*?)\\\]/g, (match, tex) => {
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'block', tex: tex });
-            return `SCRIBEMATHBLOCKX${idx}X`;
-        });
-
-        output = output.replace(/\\\(([\s\S]*?)\\\)/g, (match, tex) => {
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'inline', tex: tex });
-            return `SCRIBEMATHINLINEX${idx}X`;
-        });
-
-        output = output.replace(/\$((?:\\[\s\S]|[^$\\\n])+?)\$/g, (match, tex) => {
-            if (/^\d/.test(tex) && !/[\_\^{}+=\-*/<>\\|]/.test(tex)) {
-                return match;
-            }
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'inline', tex: tex });
-            return `SCRIBEMATHINLINEX${idx}X`;
-        });
-
-        const lastDisplayDollar = output.lastIndexOf('$$');
-        const lastDisplayBracket = output.lastIndexOf('\\[');
-        const lastInlineParen = output.lastIndexOf('\\(');
-        const lastInlineDollar = output.lastIndexOf('$');
-
-        let maxIdx = -1;
-        let selectedMode = null;
-        let delimiterLength = 0;
-
-        if (lastDisplayDollar > maxIdx) { maxIdx = lastDisplayDollar; selectedMode = 'block'; delimiterLength = 2; }
-        if (lastDisplayBracket > maxIdx) { maxIdx = lastDisplayBracket; selectedMode = 'block'; delimiterLength = 2; }
-        if (lastInlineParen > maxIdx) { maxIdx = lastInlineParen; selectedMode = 'inline'; delimiterLength = 2; }
-        if (lastInlineDollar > maxIdx) {
-            const tail = output.substring(lastInlineDollar + 1);
-            if (!/^\d/.test(tail)) {
-                maxIdx = lastInlineDollar; selectedMode = 'inline'; delimiterLength = 1;
+    _injectMathNodes(targetElement, registry) {
+        const walker = document.createTreeWalker(targetElement, NodeFilter.SHOW_TEXT, null, false);
+        const nodesToProcess = [];
+        let node;
+        
+        while (node = walker.nextNode()) {
+            if (node.nodeValue.includes('SCRIBEMATH')) {
+                nodesToProcess.push(node);
             }
         }
 
-        if (maxIdx !== -1) {
-            const openPiece = output.substring(0, maxIdx);
-            const closePiece = output.substring(maxIdx + delimiterLength);
-            if (!closePiece.includes('SCRIBEMATH')) {
-                const idx = mathRegistry.length;
-                mathRegistry.push({ type: selectedMode, tex: closePiece });
-                output = openPiece + `SCRIBEMATH${selectedMode.toUpperCase()}X${idx}X`;
-            }
-        }
+        nodesToProcess.forEach(textNode => {
+            const parent = textNode.parentNode;
+            if (!parent) return;
 
-        return { content: output, registry: mathRegistry };
-    }
+            const text = textNode.nodeValue;
+            const fragment = document.createDocumentFragment();
+            
+            const parts = text.split(/(SCRIBEMATH(?:BLOCK|INLINE)X\d+X)/);
 
-    _isolateAndPreprocessMath(text) {
-        const mathRegistry = [];
-        let output = text;
+            parts.forEach(part => {
+                if (part.startsWith('SCRIBEMATH')) {
+                    const isBlock = part.includes('BLOCK');
+                    const idxStr = part.match(/\d+/);
+                    if (idxStr) {
+                        const idx = parseInt(idxStr[0], 10);
+                        const item = registry[idx];
+                        if (item) {
+                            const wrapper = document.createElement(isBlock ? 'div' : 'span');
+                            wrapper.className = isBlock ? 'scribe-math-block' : 'scribe-math-inline';
+                            wrapper.dataset.tex = item.b64;
+                            fragment.appendChild(wrapper);
+                            return;
+                        }
+                    }
+                }
+                if (part) {
+                    fragment.appendChild(document.createTextNode(part));
+                }
+            });
 
-        // 1. Process closed block math elements
-        output = output.replace(/\$\$([\s\S]*?)\$\$/g, (match, tex) => {
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'block', tex: tex });
-            return `SCRIBEMATHBLOCKX${idx}X`;
+            parent.replaceChild(fragment, textNode);
         });
 
-        output = output.replace(/\\\[([\s\S]*?)\\\]/g, (match, tex) => {
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'block', tex: tex });
-            return `SCRIBEMATHBLOCKX${idx}X`;
-        });
-
-        // 2. Process closed inline math elements (allowing multi-line expressions via [\s\S])
-        output = output.replace(/\\\(([\s\S]*?)\\\)/g, (match, tex) => {
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'inline', tex: tex });
-            return `SCRIBEMATHINLINEX${idx}X`;
-        });
-
-        output = output.replace(/\$((?:\\[\s\S]|[^$\\])+?)\$/g, (match, tex) => {
-            if (/^\d/.test(tex) && !/[\_\^{}+=\-*/<>\\|]/.test(tex)) {
-                return match;
-            }
-            const idx = mathRegistry.length;
-            mathRegistry.push({ type: 'inline', tex: tex });
-            return `SCRIBEMATHINLINEX${idx}X`;
-        });
-
-        // 3. Robust Unclosed Streaming Context Architecture
-        const lastDisplayDollar = output.lastIndexOf('$$');
-        const lastDisplayBracket = output.lastIndexOf('\\[');
-        const lastInlineParen = output.lastIndexOf('\\(');
-        const lastInlineDollar = output.lastIndexOf('$');
-
-        let maxIdx = -1;
-        let selectedMode = null;
-        let delimiterLength = 0;
-
-        if (lastDisplayDollar > maxIdx) { maxIdx = lastDisplayDollar; selectedMode = 'block'; delimiterLength = 2; }
-        if (lastDisplayBracket > maxIdx) { maxIdx = lastDisplayBracket; selectedMode = 'block'; delimiterLength = 2; }
-        if (lastInlineParen > maxIdx) { maxIdx = lastInlineParen; selectedMode = 'inline'; delimiterLength = 2; }
-        
-        // Prevent a single-dollar query from overlapping onto an active double-dollar block boundary
-        if (lastInlineDollar > maxIdx) {
-            const isDoubleDollarOverload = (lastInlineDollar > 0 && output[lastInlineDollar - 1] === '$') || 
-                                           (lastInlineDollar < output.length - 1 && output[lastInlineDollar + 1] === '$');
-            if (!isDoubleDollarOverload) {
-                const tail = output.substring(lastInlineDollar + 1);
-                if (!/^\d/.test(tail)) {
-                    maxIdx = lastInlineDollar; selectedMode = 'inline'; delimiterLength = 1;
+        targetElement.querySelectorAll('.scribe-math-block').forEach(mathBlock => {
+            let current = mathBlock;
+            
+            if (current.parentNode && current.parentNode.tagName === 'CODE') {
+                const codeNode = current.parentNode;
+                if (codeNode.childNodes.length === 1 && codeNode.parentNode && codeNode.parentNode.tagName === 'PRE') {
+                    const preNode = codeNode.parentNode;
+                    if (preNode.childNodes.length === 1) {
+                        preNode.parentNode.replaceChild(mathBlock, preNode);
+                        current = mathBlock;
+                    }
                 }
             }
+            
+            if (current.parentNode && current.parentNode.tagName === 'P') {
+                const pNode = current.parentNode;
+                const hasMeaningfulText = Array.from(pNode.childNodes).some(n => 
+                    (n.nodeType === Node.TEXT_NODE && n.nodeValue.trim() !== '') || 
+                    (n.nodeType === Node.ELEMENT_NODE && n !== current && n.tagName !== 'BR')
+                );
+                if (!hasMeaningfulText) {
+                    pNode.parentNode.replaceChild(mathBlock, pNode);
+                }
+            }
+        });
+    }
+
+    _mountAceEditor(wrapper, editorElementOrId, lang, content, isFinalized) {
+        if (!window.ace) return null;
+
+        let editor;
+        let editorId;
+        
+        // Idempotent resolution checks to safely protect active elements from collisions
+        if (typeof editorElementOrId === 'string') {
+            editorId = editorElementOrId;
+        } else {
+            editorId = editorElementOrId.id || `ace-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+            if (!editorElementOrId.id) editorElementOrId.id = editorId;
         }
 
-        if (maxIdx !== -1) {
-            const openPiece = output.substring(0, maxIdx);
-            const closePiece = output.substring(maxIdx + delimiterLength);
-            if (!closePiece.includes('SCRIBEMATH')) {
-                const idx = mathRegistry.length;
-                mathRegistry.push({ type: selectedMode, tex: closePiece });
-                output = openPiece + `SCRIBEMATH${selectedMode.toUpperCase()}X${idx}X`;
+        // Cache verification pattern intercepts redundant window instantiation operations
+        if (this.editorPool.has(editorId)) {
+            editor = this.editorPool.get(editorId);
+        } else {
+            editor = window.ace.edit(typeof editorElementOrId === 'string' ? editorId : editorElementOrId);
+            this.editorPool.set(editorId, editor);
+        }
+
+        editor.setTheme("ace/theme/twilight");
+        
+        const extOrLang = (lang && lang.indexOf('.') > -1) ? lang.split('.').pop() : lang;
+        const aceModePath = this._resolveAceMode(extOrLang);
+        editor.session.setMode(aceModePath);
+
+        // Core local background syntax worker profiles to block unsupported 404 network crashes
+        const activeModeName = aceModePath.split('/').pop();
+        const locallySupportedWorkers = ['javascript', 'json', 'yaml', 'html', 'css', 'php', 'lua', 'xml', 'xquery', 'coffee'];
+        
+        let shouldUseWorker = false;
+        if (isFinalized) {
+            if (locallySupportedWorkers.includes(activeModeName)) {
+                shouldUseWorker = true;
+            } else if (activeModeName === 'jsx') {
+                shouldUseWorker = true; // Fallback route onto standard javascript workers
             }
         }
 
-        return { content: output, registry: mathRegistry };
+        editor.setOptions({
+            maxLines: 60,
+            minLines: 4,
+            autoScrollEditorIntoView: true,
+            fontSize: "13px",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'JetBrains Mono', monospace",
+            showPrintMargin: false,
+            useWorker: shouldUseWorker, 
+            showFoldWidgets: true,
+            wrap: true,
+            indentedSoftWrap: true,
+            highlightActiveLine: !!isFinalized,
+            displayIndentGuides: true,
+            highlightGutterLine: true,
+            scrollPastEnd: 0.1,
+            readOnly: false, // Unlocked globally to hook live autocompleters on target inputs
+            enableBasicAutocompletion: true,
+            enableLiveAutocompletion: true,
+            enableSnippets: true,
+            navigateWithinSoftTabs: true,
+            animatedScroll: true,
+            fadeFoldWidgets: true
+        });
+
+        editor.session.setTabSize(4);
+        editor.session.setUseSoftTabs(true);
+
+        if (editor.getValue() !== (content || '')) {
+            editor.setValue(content || '', 1);
+        }
+        editor.clearSelection();
+
+        if (wrapper && !this.observedNodes.has(editorId)) {
+            this.editorObserver.observe(wrapper);
+            this.observedNodes.set(editorId, wrapper);
+        }
+        return editor;
     }
 
-    _renderMarkdownAndMath(targetElement, rawContent) {
-        const processed = this._isolateAndPreprocessMath(rawContent);
-        let htmlOut = window.marked ? window.marked.parse(processed.content) : processed.content;
+    _renderMarkdownAndMath(targetElement, rawContent, registry) {
+        let htmlOut = window.marked ? window.marked.parse(rawContent) : rawContent;
         
         if (window.DOMPurify) {
             htmlOut = window.DOMPurify.sanitize(htmlOut, {
                 ADD_TAGS: ['details', 'summary', 'artifact', 'span', 'div'],
-                ADD_ATTR: ['data-tex', 'data-lang', 'data-filename', 'class']
+                ADD_ATTR: ['data-tex', 'data-lang', 'data-filename', 'class', 'target', 'rel', 'data-block-type'] 
             });
         }
 
-        processed.registry.forEach((item, idx) => {
-            const token = `SCRIBEMATH${item.type.toUpperCase()}X${idx}X`;
-            const b64 = btoa(encodeURIComponent(item.tex));
-            const className = item.type === 'block' ? 'scribe-math-block' : 'scribe-math-inline';
-            const elementHtml = item.type === 'block' 
-                ? `<div class="${className}" data-tex="${b64}"></div>` 
-                : `<span class="${className}" data-tex="${b64}"></span>`;
-            
-            htmlOut = htmlOut.replace(token, elementHtml);
-        });
-
         targetElement.innerHTML = htmlOut;
+        if (registry && registry.length > 0) {
+            this._injectMathNodes(targetElement, registry);
+        }
 
         if (window.katex) {
             targetElement.querySelectorAll('.scribe-math-inline, .scribe-math-block').forEach(el => {
                 const b64 = el.dataset.tex;
                 if (!b64) return;
+                
                 const isBlock = el.classList.contains('scribe-math-block');
                 const cacheKey = `${b64}-${isBlock ? 'block' : 'inline'}`;
 
@@ -401,11 +589,20 @@ class ScribeCompositor {
                     el.innerHTML = this.mathRenderCache.get(cacheKey);
                     return;
                 }
+
+                let tex = '';
                 try {
-                    // Corrected: Pure symmetrically balanced decoding strategy
-                    const tex = decodeURIComponent(atob(b64));
+                    const decoded = atob(b64);
+                    try { tex = decodeURIComponent(decoded); } catch(e) { tex = decoded; }
+                    tex = this._healKaTeX(tex); 
+                } catch (decodeErr) {
+                    el.textContent = "Math Parse Error (Corrupt Base64)";
+                    return;
+                }
+
+                try {
                     const container = document.createElement(isBlock ? 'div' : 'span');
-                    window.katex.render(tex, container, { displayMode: isBlock, throwOnError: false });
+                    window.katex.render(tex, container, { displayMode: isBlock, throwOnError: true });
                     
                     if (this.mathRenderCache.size >= 500) {
                         const firstKey = this.mathRenderCache.keys().next().value;
@@ -413,8 +610,10 @@ class ScribeCompositor {
                     }
                     this.mathRenderCache.set(cacheKey, container.innerHTML);
                     el.innerHTML = container.innerHTML;
+                    el.classList.remove('scribe-math-raw');
                 } catch (err) {
-                    el.textContent = decodeURIComponent(atob(b64));
+                    el.textContent = tex;
+                    el.classList.add('scribe-math-raw');
                 }
             });
         }
@@ -431,8 +630,11 @@ class ScribeCompositor {
                 if (preElement && preElement.parentNode) {
                     const mathDiv = document.createElement('div');
                     mathDiv.className = 'scribe-math-block';
-                    const rawText = codeNode.textContent.trim();
-                    const cacheKey = btoa(encodeURIComponent(rawText)) + '-block';
+                    const rawText = this._healKaTeX(codeNode.textContent.trim());
+                    
+                    let safeKey = "";
+                    try { safeKey = btoa(encodeURIComponent(rawText)); } catch(e) { safeKey = "error"; }
+                    const cacheKey = safeKey + '-block';
                     
                     if (this.mathRenderCache.has(cacheKey)) {
                         mathDiv.innerHTML = this.mathRenderCache.get(cacheKey);
@@ -440,7 +642,7 @@ class ScribeCompositor {
                         try {
                             window.katex.render(rawText, mathDiv, {
                                 displayMode: true,
-                                throwOnError: false
+                                throwOnError: true
                             });
                             if (this.mathRenderCache.size >= 500) {
                                 const firstKey = this.mathRenderCache.keys().next().value;
@@ -449,6 +651,7 @@ class ScribeCompositor {
                             this.mathRenderCache.set(cacheKey, mathDiv.innerHTML);
                         } catch (e) {
                             mathDiv.textContent = rawText;
+                            mathDiv.classList.add('scribe-math-raw');
                         }
                     }
                     preElement.parentNode.replaceChild(mathDiv, preElement);
@@ -501,13 +704,16 @@ class ScribeCompositor {
                 isPendingRender: false,
                 lastRenderTime: 0,
                 parsedBlocks: [], 
-                blockNodes: []    
+                blockNodes: [],
+                mathRegistry: []
             });
             if (initialText) {
                 this.streamToken(msgId, '');
             }
         } else {
-            this._renderMarkdownAndMath(content, initialText);
+            const parsed = this._unifiedParseAndIsolate(initialText);
+            const fallbackContent = parsed.blocks && parsed.blocks[0] ? parsed.blocks[0].content : '';
+            this._renderMarkdownAndMath(content, fallbackContent, parsed.registry);
         }
 
         this._scrollToBottom(true);
@@ -544,79 +750,55 @@ class ScribeCompositor {
             ['think', 'rlm_exec', 'rlm_result', 'candidate', 'evaluation'].includes(block.type) ? 'details' : 'div'
         );
         let target = wrapper;
+        wrapper.dataset.blockType = block.type; 
 
         if (block.type === 'text') {
             wrapper.className = 'scribe-text-block';
         } else if (block.type === 'artifact') {
             const langMatch = block.attributes.match(/language=["']?([^"'\s]+)["']?/i) || block.attributes.match(/lang=["']?([^"'\s]+)["']?/i);
             const nameMatch = block.attributes.match(/identifier=["']?([^"'\s]+)["']?/i) || block.attributes.match(/name=["']?([^"'\s]+)["']?/i);
-            const lang = langMatch ? langMatch[1] : 'text';
+            const lang = langMatch ? langMatch[1].toLowerCase() : 'text';
             const name = nameMatch ? nameMatch[1] : lang.toUpperCase();
-            const editorId = `${msgId}-ace-art-${blockIndex}`;
-
-            wrapper.className = 'scribe-ace-wrapper';
-            wrapper.dataset.aceInjected = "true";
-            wrapper.dataset.editorId = editorId;
-
-            const actionBar = document.createElement('div');
-            actionBar.className = 'ace-action-bar';
             
-            const langLabel = document.createElement('span');
-            langLabel.className = 'ace-lang-label';
-            langLabel.textContent = name;
+            const delegateToNative = ['math', 'latex', 'katex', 'mermaid', 'markdown', 'md'];
+            
+            if (delegateToNative.includes(lang)) {
+                wrapper.className = 'scribe-text-block scribe-artifact-native';
+                wrapper.dataset.lang = lang;
+                target = wrapper;
+            } else {
+                const editorId = `${msgId}-ace-art-${blockIndex}`;
+                wrapper.className = 'scribe-ace-wrapper';
+                wrapper.dataset.aceInjected = "true";
+                wrapper.dataset.editorId = editorId;
 
-            const copyBtn = document.createElement('button');
-            copyBtn.className = 'action-btn ace-copy-btn';
-            copyBtn.innerHTML = 'Copy Code';
-            
-            actionBar.appendChild(langLabel);
-            actionBar.appendChild(copyBtn);
-            
-            const editorDiv = document.createElement('div');
-            editorDiv.id = editorId;
-            editorDiv.className = 'scribe-ace-editor';
-            
-            wrapper.appendChild(actionBar);
-            wrapper.appendChild(editorDiv);
-            target = editorDiv;
+                const actionBar = document.createElement('div');
+                actionBar.className = 'ace-action-bar';
+                
+                const langLabel = document.createElement('span');
+                langLabel.className = 'ace-lang-label';
+                langLabel.textContent = name;
 
-            window.requestAnimationFrame(() => {
-                if (window.ace) {
-                    const editor = window.ace.edit(editorId);
-                    this.editorPool.set(editorId, editor);
-                    editor.setTheme("ace/theme/twilight");
-                    
-                    let aceModePath = "ace/mode/text";
-                    if (window.ace.require) {
-                        const modelist = window.ace.require("ace/ext/modelist");
-                        if (modelist) {
-                            const virtualFileName = name.indexOf('.') > -1 ? name : `virtual_artifact.${lang}`;
-                            const resolvedMode = modelist.getModeForPath(virtualFileName);
-                            if (resolvedMode && resolvedMode.mode) aceModePath = resolvedMode.mode;
-                        }
-                    }
-                    editor.session.setMode(aceModePath);
-                    editor.setOptions({
-                        maxLines: 60,
-                        minLines: 2,
-                        autoScrollEditorIntoView: true,
-                        fontSize: "14px",
-                        showPrintMargin: false,
-                        useWorker: false, 
-                        showFoldWidgets: true,
-                        wrap: true,
-                        highlightActiveLine: true,
-                        displayIndentGuides: true,
-                        highlightGutterLine: true,
-                        scrollPastEnd: 0.2,
-                        readOnly: false
-                    });
-                    editor.setValue(block.content, 1);
-                    this.editorObserver.observe(wrapper);
-                    this.observedNodes.set(editorId, wrapper);
-                    
-                    copyBtn.onclick = () => {
-                        navigator.clipboard.writeText(editor.getValue()).then(() => {
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'action-btn ace-copy-btn';
+                copyBtn.innerHTML = 'Copy Code';
+                
+                actionBar.appendChild(langLabel);
+                actionBar.appendChild(copyBtn);
+                
+                const editorDiv = document.createElement('div');
+                editorDiv.id = editorId;
+                editorDiv.className = 'scribe-ace-editor';
+                
+                wrapper.appendChild(actionBar);
+                wrapper.appendChild(editorDiv);
+                target = editorDiv;
+
+                this._mountAceEditor(wrapper, editorDiv, lang, block.content, false);
+
+                copyBtn.onclick = () => {
+                    if (this.editorPool.has(editorId)) {
+                        navigator.clipboard.writeText(this.editorPool.get(editorId).getValue()).then(() => {
                             copyBtn.innerHTML = 'Copied!';
                             copyBtn.classList.add('success');
                             setTimeout(() => {
@@ -624,9 +806,9 @@ class ScribeCompositor {
                                 copyBtn.classList.remove('success');
                             }, 2000);
                         });
-                    };
-                }
-            });
+                    }
+                };
+            }
         } else if (['think', 'rlm_exec', 'rlm_result', 'candidate', 'evaluation'].includes(block.type)) {
             wrapper.className = 'scribe-thought-block';
             wrapper.open = true;
@@ -681,23 +863,53 @@ class ScribeCompositor {
         return { wrapper, target };
     }
 
-    _updateBlockContent(nodeObj, block) {
+    _updateBlockContent(nodeObj, block, registry) {
         if (block.type === 'status') return;
         if (nodeObj.lastContentTrace === block.content) return;
         nodeObj.lastContentTrace = block.content;
 
         if (block.type === 'text' || block.type === 'think' || block.type === 'candidate' || block.type === 'evaluation') {
-            this._renderMarkdownAndMath(nodeObj.target, block.content);
+            this._renderMarkdownAndMath(nodeObj.target, block.content, registry);
         } else if (block.type === 'winner') {
-            nodeObj.target.innerHTML = `<strong>Optimal Vector Selected:</strong> ${DOMPurify.sanitize(this._escapeHtml(block.content))}`;
+            nodeObj.target.innerHTML = `<strong>Optimal Vector Selected:</strong> ${window.DOMPurify.sanitize(this._escapeHtml(block.content))}`;
         } else if (block.type === 'artifact') {
-            const editorId = nodeObj.wrapper.dataset.editorId;
-            if (window.ace && editorId && this.editorPool.has(editorId)) {
-                const editor = this.editorPool.get(editorId);
-                if (editor && editor.getValue() !== block.content) {
-                    const scrollPos = editor.session.getScrollTop();
-                    editor.setValue(block.content, 1);
-                    editor.session.setScrollTop(scrollPos);
+            if (nodeObj.wrapper.classList.contains('scribe-artifact-native')) {
+                const lang = nodeObj.wrapper.dataset.lang;
+                let contentToRender = block.content;
+                
+                if (['math', 'latex', 'katex'].includes(lang)) {
+                    contentToRender = contentToRender.trim();
+                    if (!contentToRender.startsWith('$$') && !contentToRender.startsWith('\\begin') && !contentToRender.startsWith('\\[')) {
+                        contentToRender = `$$\n${contentToRender}\n$$`;
+                    }
+                    const fakeParsed = this._unifiedParseAndIsolate(contentToRender);
+                    this._renderMarkdownAndMath(nodeObj.target, fakeParsed.blocks[0].content, fakeParsed.registry);
+                } else if (lang === 'mermaid') {
+                    contentToRender = `\`\`\`mermaid\n${contentToRender.trim()}\n\`\`\``;
+                    this._renderMarkdownAndMath(nodeObj.target, contentToRender, []);
+                } else {
+                    this._renderMarkdownAndMath(nodeObj.target, contentToRender, []);
+                }
+            } else {
+                const editorId = nodeObj.wrapper.dataset.editorId;
+                if (window.ace && editorId && this.editorPool.has(editorId)) {
+                    const editor = this.editorPool.get(editorId);
+                    if (editor) {
+                        const currentVal = editor.getValue();
+                        if (block.content !== currentVal) {
+                            if (block.content.startsWith(currentVal)) {
+                                const newText = block.content.substring(currentVal.length);
+                                const lastRow = editor.session.getLength() - 1;
+                                const lastCol = editor.session.getLine(lastRow).length;
+                                editor.session.insert({row: lastRow, column: lastCol}, newText);
+                            } else {
+                                const scrollPos = editor.session.getScrollTop();
+                                editor.setValue(block.content, 1);
+                                editor.session.setScrollTop(scrollPos);
+                            }
+                            editor.clearSelection();
+                        }
+                    }
                 }
             }
         } else if (block.type === 'rlm_exec' || block.type === 'rlm_result') {
@@ -714,7 +926,27 @@ class ScribeCompositor {
         stream.lastRenderTime = performance.now();
         const isAtBottom = this._isScrolledToBottom();
         const rawText = this.messageRegistry.get(msgId) || '';
-        const currentBlocks = this._lexicalStreamParse(rawText);
+        
+        const parsedData = this._unifiedParseAndIsolate(rawText);
+        const currentBlocks = parsedData.blocks;
+        stream.mathRegistry = parsedData.registry;
+
+        if (currentBlocks.length < stream.blockNodes.length) {
+            for (let j = currentBlocks.length; j < stream.blockNodes.length; j++) {
+                const deadNode = stream.blockNodes[j];
+                if (deadNode && deadNode.wrapper) {
+                    deadNode.wrapper.remove();
+                    const editorId = deadNode.wrapper.dataset.editorId;
+                    if (editorId && this.editorPool.has(editorId)) {
+                        try {
+                            this.editorPool.get(editorId).destroy();
+                            this.editorPool.delete(editorId);
+                        } catch (e) {}
+                    }
+                }
+            }
+            stream.blockNodes.length = currentBlocks.length;
+        }
 
         for (let i = 0; i < currentBlocks.length; i++) {
             const block = currentBlocks[i];
@@ -725,13 +957,33 @@ class ScribeCompositor {
             }
 
             let nodeObj = stream.blockNodes[i];
+            
+            if (nodeObj && nodeObj.wrapper && nodeObj.wrapper.dataset.blockType !== block.type) {
+                nodeObj.wrapper.remove();
+                const editorId = nodeObj.wrapper.dataset.editorId;
+                if (editorId && this.editorPool.has(editorId)) {
+                    try {
+                        this.editorPool.get(editorId).destroy();
+                        this.editorPool.delete(editorId);
+                    } catch (e) {}
+                }
+                nodeObj = null;
+            }
+
             if (!nodeObj) {
                 nodeObj = this._createBlockElement(block, msgId, i);
                 stream.container.appendChild(nodeObj.wrapper);
                 stream.blockNodes[i] = nodeObj;
+                
+                if (block.type === 'artifact' && nodeObj.wrapper.dataset.aceInjected === "true") {
+                    const editorId = nodeObj.wrapper.dataset.editorId;
+                    if (this.editorPool.has(editorId)) {
+                        this.editorPool.get(editorId).resize();
+                    }
+                }
             }
 
-            this._updateBlockContent(nodeObj, block);
+            this._updateBlockContent(nodeObj, block, stream.mathRegistry);
 
             if (block.isComplete && nodeObj.wrapper.tagName === 'DETAILS') {
                 if (block.type === 'think' || block.type === 'rlm_exec' || block.type === 'rlm_result' || block.type === 'candidate') {
@@ -756,9 +1008,10 @@ class ScribeCompositor {
             const nodeObj = stream.blockNodes[index];
             if (nodeObj && block.type === 'artifact') {
                 const editorId = nodeObj.wrapper.dataset.editorId;
-                if (window.ace && editorId && this.editorPool.has(editorId)) {
-                    const editor = this.editorPool.get(editorId);
-                    if (editor) editor.setOption("useWorker", true);
+                if (editorId) {
+                    const langMatch = block.attributes.match(/language=["']?([^"'\s]+)["']?/i) || block.attributes.match(/lang=["']?([^"'\s]+)["']?/i);
+                    const lang = langMatch ? langMatch[1].toLowerCase() : 'text';
+                    this._mountAceEditor(nodeObj.wrapper, editorId, lang, block.content, true);
                 }
             }
             if (!block.isComplete) {
@@ -772,7 +1025,23 @@ class ScribeCompositor {
             }
         });
 
-        const blocksToProcess = Array.from(stream.container.querySelectorAll('pre:not(.thought-content pre)'));
+        const allPres = Array.from(stream.container.querySelectorAll('pre'));
+        const delegateToNative = ['math', 'latex', 'katex', 'mermaid', 'markdown', 'md'];
+
+        const blocksToProcess = allPres.filter(pre => {
+            if (pre.closest('.thought-content') || pre.closest('.scribe-ace-wrapper') || pre.closest('.scribe-artifact-native')) return false;
+            
+            const codeNode = pre.querySelector('code');
+            if (codeNode) {
+                const hasBlacklistedLang = Array.from(codeNode.classList).some(cls => {
+                    const lang = cls.toLowerCase().replace('language-', '');
+                    return delegateToNative.includes(lang);
+                });
+                if (hasBlacklistedLang) return false;
+            }
+            return true;
+        });
+
         for (let index = 0; index < blocksToProcess.length; index++) {
             const blockElement = blocksToProcess[index];
             if (blockElement.dataset.aceInjected) continue; 
@@ -781,13 +1050,12 @@ class ScribeCompositor {
             if (!codeNode) continue;
 
             const rawCode = codeNode.textContent;
-            let displayLabel = "CODE";
             let lang = "text";
 
             codeNode.classList.forEach(cls => {
                 if (cls.startsWith('language-')) lang = cls.replace('language-', '');
             });
-            displayLabel = lang.toUpperCase() || "TEXT";
+            const displayLabel = lang.toUpperCase() || "TEXT";
 
             const editorId = `${msgId}-ace-${index}`;
             const aceContainer = document.createElement('div');
@@ -830,59 +1098,9 @@ class ScribeCompositor {
             aceContainer.appendChild(editorDiv);
 
             blockElement.parentNode.replaceChild(aceContainer, blockElement);
-            this.editorObserver.observe(aceContainer);
-            this.observedNodes.set(editorId, aceContainer);
             aceContainer.dataset.aceInjected = "true";
 
-            window.requestAnimationFrame(() => {
-                if (window.ace) {
-                    const editor = window.ace.edit(editorId);
-                    this.editorPool.set(editorId, editor);
-                    editor.setTheme("ace/theme/twilight");
-                    
-                    let aceModePath = "ace/mode/text";
-                    if (window.ace.require) {
-                        const modelist = window.ace.require("ace/ext/modelist");
-                        if (modelist) {
-                            const virtualFileName = `virtual_code.${lang}`;
-                            const resolvedMode = modelist.getModeForPath(virtualFileName);
-                            if (resolvedMode && resolvedMode.mode) aceModePath = resolvedMode.mode;
-                        }
-                    }
-                    
-                    if (aceModePath === "ace/mode/text") {
-                        const heuristicMap = {
-                            'js': 'javascript', 'ts': 'typescript', 'py': 'python', 
-                            'cpp': 'c_cpp', 'c': 'c_cpp', 'bash': 'sh', 'shell': 'sh',
-                            'vue': 'html', 'react': 'jsx', 'yml': 'yaml', 'docker': 'dockerfile',
-                            'json': 'json', 'md': 'markdown', 'html': 'html'
-                        };
-                        const fallback = heuristicMap[lang] || lang;
-                        aceModePath = `ace/mode/${fallback}`;
-                    }
-                    
-                    editor.session.setMode(aceModePath);
-                    editor.setOptions({
-                        maxLines: 60,
-                        minLines: 2,
-                        autoScrollEditorIntoView: true,
-                        fontSize: "14px",
-                        showPrintMargin: false,
-                        useWorker: true, 
-                        showFoldWidgets: true, 
-                        wrap: true,                  
-                        highlightActiveLine: true,   
-                        displayIndentGuides: true,   
-                        highlightGutterLine: true,
-                        scrollPastEnd: 0.2, 
-                        readOnly: false 
-                    });
-
-                    window.requestAnimationFrame(() => {
-                        editor.resize(true);
-                    });
-                }
-            });
+            this._mountAceEditor(aceContainer, editorDiv, lang, rawCode, true);
         }
 
         this.activeStreams.delete(msgId);
