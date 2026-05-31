@@ -1,8 +1,8 @@
-# Scribe-LLM: The Ephemeral Control Plane & Cognitive Matrix
+# Scribe-LLM: An Ephemeral Control Plane & Cognitive Matrix
 
 <div align="center">
     
-*Intelligence Orchestration, at its finest.*
+*Local Orchestration Engine and Stateful Execution Workspace*
 
 [![Status: Production Ready](https://img.shields.io/badge/Status-Production_Ready-10b981?style=flat-square)](#)
 [![Architecture: Monolithic_LSP](https://img.shields.io/badge/Architecture-Monolithic_LSP-818cf8?style=flat-square)](#)
@@ -13,42 +13,33 @@
 ---
 
 ## 🌐 Macro Identity & Topology
-Scribe-LLM is a high-performance, fully air-gapped local orchestration engine and AI execution workspace designed to bridge the gap between probabilistic transformer models and deterministic software control layers. Rather than treating local weights as simple chat completion endpoints, Scribe-LLM treats them as atomic data transformation engines executing inside stateful, Directed Acyclic Graph (DAG) logic flows.
+Scribe-LLM is a locally containerized orchestration engine and execution workspace designed to interface probabilistic transformer models with deterministic software control layers. Rather than treating local weights as stateless chat endpoints, Scribe-LLM processes model outputs as atomic data transformations executing within structured, Directed Acyclic Graph (DAG) logic flows.
 
-Built natively on standard Python primitives for the backend runtime and a custom web components matrix for the layout interface, the ecosystem runs entirely on local host hardware with zero external third-party framework overhead, secondary network layers, or cloud analytics dependencies.
+The backend runtime is constructed using standard Python primitives, while the interface utilizes a decoupled web components architecture. The ecosystem runs entirely on local host hardware without dependencies on external frameworks, secondary network transport layers, or remote telemetry collection.
 
 ---
 
 ## 🧠 Core Mechanics & Theoretical Foundations
 
 ### 1. Parallel Trajectory Steering (DisCIPL)
-* **Core Mechanics:** Implements advanced tree-search nodes (`MCTSNodeStrategy`) that fork generation tasks into parallel concurrent validation tracks (`candidatesCount`) across multi-step depths. A dedicated critic schema validation loop evaluates intermediate content, programmatically culls low-scoring logical branches, and resamples optimal trajectories.
-* **Academic Lineage:** Developed directly from the **DisCIPL** paradigm (*Divergent Chain-of-Thought Inference via Parallelized Leverage* / *Self-Steering Language Models*, Grand et al., 2025; MIT / Yale), forcing mathematical rigor onto open-ended local outputs by steering token streams through runtime verification layers.
+* **Core Mechanics:** Implements tree-search nodes (`MCTSNodeStrategy`) that fork generation tasks into parallel validation tracks (`candidatesCount`) across multi-step execution depths. A dedicated structural verification loop evaluates intermediate outputs, pruning low-scoring logical branches and resampling optimal trajectories.
+* **Academic Lineage:** Derived from the **DisCIPL** framework (*Divergent Chain-of-Thought Inference via Parallelized Leverage* / *Self-Steering Language Models*, Grand et al., 2025; MIT / Yale), enforcing structural constraints on open-ended inference by steering token streams through runtime verification layers.
 
 ### 2. Telemetry-Driven Stream Continuation 
-* **Core Mechanics:** Completely eliminates fragile client-side string-scraping heuristics (such as bracket counting or regex text splitting) to check for truncation errors. Scribe captures low-level chunk metadata signals (`finish_reason`) directly from the incoming inference stream. If an intentional output naturally ends on a trailing character (e.g., an open brace {}), the engine lets it stand. If an execution cut-off happens mid-turn (`finish_reason: "length"`), the system freezes the history array, appends the partial generation as an assistant role prefix, and continues typing instantly from the exact last character without losing its place or re-entering planning cycles.
-* **Academic Lineage:** Aligned with **Grammar-Constrained Decoding (GCD) Optimization** principles (Hamilton & Mimno, 2025; Cornell University), resolving token-clipping errors while maintaining perfect Key-Value (KV) cache continuity.
+* **Core Mechanics:** Bypasses client-side string-parsing heuristics (such as bracket counting or regular expression evaluation) to identify truncation. Scribe captures low-level chunk metadata signals (`finish_reason`) directly from the incoming inference stream. If an output naturally terminates on a trailing sequence, the state is preserved as-is. If an execution cut-off occurs due to context exhaustion (`finish_reason: "length"`), the system commits the generation history, appends the partial generation as an assistant role prefix, and resumes inference immediately from the last emitted token without losing cache state or repeating planning phases.
+* **Academic Lineage:** Formulated in alignment with **Grammar-Constrained Decoding (GCD) Optimization** principles (Hamilton & Mimno, 2025; Cornell University), resolving token-clipping errors while maintaining Key-Value (KV) cache continuity.
 
-### 3. Hardened Tool Recursion & Symbolic Sandboxing (RLM)
-* **Core Mechanics:** Leverages the `RLMNodeStrategy` to allow models to analyze, break down, and recursively query local data structures over a private register matrix. Code tasks execute inside an air-gapped web worker sandbox (`_evaluateInWorkerSandbox`) with deeply frozen JavaScript prototype chains and shadowed network communication layers to make data exfiltration impossible.
-* **Academic Lineage:** Built upon the **Recursive Language Models (RLM)** framework (Zhang et al., 2026; MIT CSAIL) combined with recursive reasoning paradigms for compact systems (Jolicoeur-Martineau, 2025; Samsung SAIL Montréal), expanding functional execution horizons by letting models continuously inspect and iterate on their own tool-use loops.
+### 3. Isolated Tool Recursion & Symbolic Sandboxing (RLM)
+* **Core Mechanics:** Utilizes the `RLMNodeStrategy` to enable models to inspect, decompose, and recursively query local data structures over an internal register matrix. Executable operations run within an isolated web worker sandbox (`_evaluateInWorkerSandbox`) with frozen JavaScript prototype chains and shadowed network layers to prevent arbitrary execution outside the workspace container.
+* **Academic Lineage:** Positioned atop the **Recursive Language Models (RLM)** architecture (Zhang et al., 2026; MIT CSAIL) combined with recursive reasoning paradigms for constrained architectures (Jolicoeur-Martineau, 2025; Samsung SAIL Montréal), expanding functional execution limits by enabling models to inspect and iterate on their own tool execution loops.
 
-### 4. Viscoelastic Attention & Memory Protection
-* **Core Mechanics:** Employs a context bounds optimization manager (`ContextMatrix.enforceContextBounds`) that calculates physical memory limits before every execution cycle. When boundaries are breached, the matrix applies intelligent compression pipelines to condense historical conversation drift, while system core instructions and prompt anchors remain securely locked inside VRAM cache segments.
-* **Academic Lineage:** Inspired by the **Attention Compression (CSA/HCA)** architectures pioneered in *DeepSeek-V4* (DeepSeek-AI, 2025), enabling long-range context handling without losing track of foundational system instructions.
+### 4. Attention Optimization & Memory Management
+* **Core Mechanics:** Employs a context bounds optimization manager (`ContextMatrix.enforceContextBounds`) that calculates hardware memory allocations before every execution cycle. When boundaries are reached, the matrix applies compression workflows to condense historical conversation layers, while foundational system instructions and prompt anchors remain persistently pinned within VRAM cache allocations.
+* **Academic Lineage:** Formulated from the **Attention Compression (CSA/HCA)** concepts developed in *DeepSeek-V4* (DeepSeek-AI, 2025), enabling long-range context evaluation while retaining baseline system directives.
 
 ### 5. Native AST Lexical Math Integration & Pushdown Tokestream Parsing
-* **Core Mechanics:** Completely eliminates macro-text placeholding and volatile text-swapping hacks. Scribe utilizes a native tokenization compiler extension directly embedded inside the markdown lexer loop. Mathematical delimiters ($, $$, \(, \[) are intercepted at the character level before markdown parsing occurs, isolating raw expressions into immutable token nodes. This guarantees total immunity against syntax-character collisions (such as underscores _ or asterisks *) while passing uncorrupted text parameters to KaTeX with absolute byte-fidelity.
-* **Visual Frame Throttling:** Handled by a single-pass pushdown automaton (`_lexicalStreamParse`) that tracks inline and block boundaries character-by-character, managing dynamic interface component windows natively and rendering streaming tokens on animation frames (`requestAnimationFrame`) to ensure zero layout thrashing or selection loss.
-
----
-
-## ⚙️ The GGUFicator Matrix: Model Acquisition & Custom Forge
-
-Scribe-LLM hosts an integrated, headless model management and tensor manipulation workspace that handles the entire lifecycle of model acquisition:
-* **Interactive Registry Probing:** Connects to remote model repositories to dynamically discover, filter, and map model properties, tracking file footprints and structural metadata layers before downloading.
-* **Direct Payload Distribution:** Deploys background worker channels to download pre-quantized model configurations safely into local workspace repositories.
-* **The Custom Quantization Forge:** Transforms raw source weights (such as `.safetensors` files) into optimized local configurations. The workspace automatically downloads source artifacts, processes tensor files down to advanced quantization profiles (K-Quants and high-density I-Quants like IQ3_M or IQ4_XS), and injects appropriate template layers to guarantee clean decoding performance.
+* **Core Mechanics:** Eliminates macro-text placeholding and post-processing text-swapping operations. Scribe utilizes an inline character-level interceptor embedded directly within the live streaming lexer loop. Mathematical delimiters (`$`, `$$`, `\(`, `\[`) are isolated at the raw byte level during token stream arrival, capturing expressions into immutable node blocks before markdown parsing occurs. This prevents syntax-character collisions (such as underscores `_` or asterisks `*` interrupting mathematical formatting) while passing pristine parameters directly to KaTeX.
+* **Visual Frame Throttling:** Governed by a single-pass, character-by-character pushdown automaton (`_lexicalStreamParse`) that tracks inline and block boundary depths on a native state stack. This state machine manages interface component rendering on line-buffered increments and updates streaming tokens on animation frames (`requestAnimationFrame`), mitigating layout thrashing and preserving text selection state during generation.
 
 ---
 
@@ -56,17 +47,17 @@ Scribe-LLM hosts an integrated, headless model management and tensor manipulatio
 
 ```text
 Scribe-LLM/
-├── server.py                 # Core backend daemon, hardware profiler, and request proxy
-├── start.bat                 # Zero-dependency ignition bootstrap script for Windows
+├── server.py                 # Core backend daemon, hardware profiler, and request routing
+├── start.bat                 # Zero-dependency bootstrap script for Windows environments
 ├── requirements.txt          # Explicit package dependency manifest definition array
-├── models/                   # Local GGUF neural core weight file storage directory
+├── models/                   # Storage directory for local GGUF models and associated layers
 ├── LMCPP/                    # High-performance C++ core inference binaries
-├── acquisition_engine/       # Quantization forge scripts and file workers
+├── acquisition_engine/       # Quantization forge scripts and file execution workers
 └── static/
-    ├── index.html            # Main desktop application interface layout
+    ├── index.html            # Primary web application interface layout
     ├── grammars/             # DAG blueprints, JSON validation schemas, and node logic
     └── js/
-        ├── app.js            # Main UI orchestrator, context compiler, and override manager
+        ├── app.js            # Main UI orchestrator, context compiler, and state manager
         ├── api_gateway.js    # Concurrency multiplexer handling socket communication rules
         ├── physics_engine.js # Resource profiling calculator mapping VRAM/RAM budgets
         ├── neural_engine.js  # Stateful graph logic engine, context manager, and RLM runners
@@ -75,33 +66,33 @@ Scribe-LLM/
 
 ---
 
-## 🚀 Deployment & Hydration Protocol
+## 🚀 Deployment & Environment Hydration
 
-Scribe-LLM is engineered as an entirely relocatable, self-contained workspace environment. It utilizes an OS-gnostic, hermetic bootstrapping engine that automates target core extraction and isolates execution layers from the host system dependencies.
+Scribe-LLM is engineered as a relocatable, self-contained workspace environment. It utilizes an OS-independent bootstrapping process that isolates execution dependencies from the host environment.
 
 ### 1. Pre-Flight Architecture Constraints
-* **State Cleanliness:** No pre-existing system-wide software tracking packages, compilation toolchains, or global virtual environments are required.
-* **Network Capabilities:** Direct standard library network streams are deployed for asset fetching, avoiding rate-limiting barriers or external CLI configuration requirements.
+◦ Environment Isolation: No globally installed compilation toolchains, runtime management packages, or system-wide virtual environments are required.
+◦ Network Channels: Utilizes standard library network streams for asset retrieval, bypassing external CLI utility dependencies or global configuration hooks.
 
 ### 2. Structural Workspace Provisioning
-Initialize the self-healing control plane by launching the core provisioner from the workspace root. The orchestrator automatically maps internal dependency topologies, detects local hardware compute engines, and binds isolated runtimes.
+Initialize the control plane by launching the provisioner from the workspace root. The orchestrator maps internal dependency topologies, evaluates local hardware compute backends, and binds isolated runtimes.
 
 ```bash
 # Execute standard hydration track using default interactive prompt sequence
 python setup.py
 
-# Force clean-room purge of compilation layers and lock environment track to explicit distribution version
+# Purge existing compilation layers and bind environment to an explicit distribution track
 python setup.py --python 3.14.5 --update
 ```
 
-### 3. Execution Control Matrix
-* `--python [version]`: Forces absolute runtime track pinning (`3.10.11` through `3.14.5`), fetching static standalone binaries directly into local containment storage frames (`.venv/`).
-* `--update`: Triggers immediate, non-destructive extraction purges across local artifact boundaries and compilation environments, refreshing state blocks while preserving model checkpoint storage (`models/`).
+### 3. Execution Control Parameters
+* `--python [version]`: Enforces runtime track pinning (`3.10.11` through `3.14.5`), fetching static standalone binaries directly into local containment frames (`.venv/`).
+* `--update`: Initiates a non-destructive extraction and purge across internal compilation boundaries, updating runtime states while preserving local model weights (`models/`).
 
-### 4. Deterministic Lockdown & Ignition
+### 4. Verification & Ignition
 Upon successful execution, the pipeline serializes the environment state space into an immutable configuration lock file (`constraints.lock`). This locks down package constraints to guarantee zero upstream dependency drift over long-term operations.
 
-Launch the local system interface container using the tailored environment bootstrap script created for the host operating system context:
+Launch the local system interface container using the environment bootstrap script tailored for the host operating system context:
 
 ```bash
 # Windows Infrastructure Launch Sequence
@@ -113,12 +104,12 @@ Launch the local system interface container using the tailored environment boots
 
 ---
 
-## 🎛️ Operator Overrides vs. Adaptive Space
+## 🎛️ Operator Overrides vs. Adaptive Parameter Tuning
 
-Scribe-LLM balances automated adjustments with explicit operator control:
-* **Adaptive Defaults:** The interface leaves options like context sizes and offload layers in their default state. The core physics engine scales variables automatically as you swap models, ensuring optimal performance based on real-time resource availability.
-* **Manual Overrides:** Interacting with any configuration slider activates a manual override flag (`userOverrides: true`), locking your choices in. The background engine respects your locked settings, dynamically modifying the remaining parameters to keep memory allocations stable and protect the system from crashes.
-* **The Optimization Reset:** To clear manual adjustments and return to system optimization, simply double-click any slider label row. The parameter snaps back to its mathematically ideal calculated value automatically.
+Scribe-LLM balances automated execution configurations with precise operator boundaries:
+* **Adaptive Allocation:** The system leaves operational variables like context windows and layer offloading in their baseline states by default. The resource profiler evaluates hardware capacity in real time, scaling these parameters dynamically during model swaps to optimize memory stability.
+* **Manual Overrides:** Adjusting any configuration slider registers an explicit override flag (`userOverrides: true`), forcing the parameter into a static state. The background resource engine respects these locked constraints, dynamically rebalancing the remaining variable attributes to maintain memory boundary safety and prevent allocation faults.
+* **Parameter Reset:** To clear manual adjustments and return to system optimization, double-click the label row of any modified slider. The parameter clears its override flag and snaps back to its mathematically calculated baseline.
 
 ---
 
