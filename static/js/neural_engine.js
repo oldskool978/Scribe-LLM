@@ -79,7 +79,6 @@ class LexicalAutomaton {
         let i = 0;
         const len = text.length;
         const compressedMarker = '[LATENT REASONING COMPRESSED]';
-
         while (i < len) {
             if (text[i] === '<' && text[i + 1] !== '/') {
                 let matchedTag = null;
@@ -92,7 +91,6 @@ class LexicalAutomaton {
                         }
                     }
                 }
-
                 if (matchedTag) {
                     let inQuote = null;
                     let tagEndIdx = -1;
@@ -106,7 +104,6 @@ class LexicalAutomaton {
                             break;
                         }
                     }
-
                     if (tagEndIdx !== -1) {
                         const closeTag = `</${matchedTag}>`;
                         const closeIdx = text.indexOf(closeTag, tagEndIdx + 1);
@@ -121,12 +118,10 @@ class LexicalAutomaton {
             result += text[i];
             i++;
         }
-
         const token = '[LATENT REASONING COMPRESSED]';
         let lines = result.split('\n');
         let dynamicLines = [];
         let lastWasMarker = false;
-
         for (let line of lines) {
             let trimmed = line.trim();
             if (trimmed === token) {
@@ -166,11 +161,9 @@ class VectorizedVirtualFileSystem {
     write(key, content, mode = "overwrite") {
         const cleanContent = (content || "").trim();
         let finalContent = cleanContent;
-        
         if (mode === "append" && this.registers.has(key)) {
             finalContent = `${this.registers.get(key)}\n\n${cleanContent}`;
         }
-        
         this.registers.set(key, finalContent);
         this.lineIndex.set(key, finalContent.split('\n'));
     }
@@ -198,10 +191,8 @@ class VectorizedVirtualFileSystem {
     search(key, query, contextLines = 2) {
         const lines = this.lineIndex.get(key);
         if (!lines) return "REGISTER EMPTY";
-        
         const results = [];
         const queryLower = String(query).toLowerCase();
-        
         for (let i = 0; i < lines.length; i++) {
             if (lines[i].toLowerCase().includes(queryLower)) {
                 const start = Math.max(0, i - contextLines);
@@ -216,12 +207,10 @@ class VectorizedVirtualFileSystem {
     searchRegex(key, pattern, contextLines = 2) {
         const lines = this.lineIndex.get(key);
         if (!lines) return "REGISTER EMPTY";
-        
         const results = [];
         let regex;
         try { regex = new RegExp(pattern, 'i'); } 
         catch (e) { return `REGEX SYNTAX FAULT: ${e.message}`; }
-        
         for (let i = 0; i < lines.length; i++) {
             if (regex.test(lines[i])) {
                 const start = Math.max(0, i - contextLines);
@@ -248,9 +237,7 @@ class DAGLogicEvaluator {
     static evaluateNextStep(output, logicMap) {
         if (!logicMap) return null;
         const cleanOutput = (output || "").trim();
-        
         if (logicMap[cleanOutput]) return logicMap[cleanOutput];
-        
         if (logicMap["_condition_"]) {
             const condition = logicMap["_condition_"];
             try {
@@ -259,7 +246,6 @@ class DAGLogicEvaluator {
                     evaluatorFunc = new Function('_output_', `return ${condition};`);
                     this._compilerCache.set(condition, evaluatorFunc);
                 }
-                
                 return evaluatorFunc(cleanOutput) ? logicMap["_if_true_"] : logicMap["_if_false_"];
             } catch (e) {
                 return logicMap["_default_"] || null;
@@ -280,12 +266,11 @@ class ContextMatrix {
                 }
             }
         } catch (e) {}
-        return Math.floor(text.length / 3.5);
+        return Math.floor(text.length / 3.7);
     }
 
     static async enforceContextBounds(messagesArray, projectedTokens, statusNodeId, abortSignal, slotMultiplier = 1) {
         if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
-
         let activeMaxCtx = 8192;
         if (window.ScribeGateway?.config?.ctx_size) {
             const parsed = parseInt(window.ScribeGateway.config.ctx_size, 10);
@@ -297,7 +282,6 @@ class ContextMatrix {
                 if (!isNaN(parsed) && parsed > 0) activeMaxCtx = parsed;
             }
         }
-
         let safeMessages = [...messagesArray];
         const compileText = (msgs) => msgs.map(m => Array.isArray(m.content) ? m.content.map(c => c.text || '').join(' ') : m.content).join('\n\n');
         
@@ -311,12 +295,10 @@ class ContextMatrix {
 
         if (currentTokens + (projectedTokens * slotMultiplier) >= absoluteMaxSafe && safeMessages.length > 3) {
             window.Compositor.streamToken(statusNodeId, `\n> [CONTEXT LIMIT EVACUATION]: Executing Bulk Context-Slicing Consolidation...\n`);
-            
             const systemPreserve = safeMessages[0].role === 'system' ? 1 : 0;
             const recentWindowSize = 4;
             const intermediateStart = systemPreserve;
             const intermediateEnd = safeMessages.length - recentWindowSize;
-
             if (intermediateEnd > intermediateStart + 1) {
                 const intermediateMessages = safeMessages.slice(intermediateStart, intermediateEnd);
                 const textToCompress = intermediateMessages.map(m => `[${m.role.toUpperCase()}]: ${Array.isArray(m.content) ? m.content.map(c => c.text || '').join(' ') : m.content}`).join('\n');
@@ -330,7 +312,6 @@ class ContextMatrix {
                     max_tokens: 1024,
                     stream: false
                 };
-
                 try {
                     const res = await window.ScribeGateway._dispatch('/api/chat', compressionPayload, { signal: abortSignal });
                     const data = await res.json();
@@ -356,9 +337,8 @@ class ContextMatrix {
         if (currentTokens + (projectedTokens * slotMultiplier) >= absoluteMaxSafe) {
             return { isSafe: false, safeMessages, safeMaxTokens: 0, currentCount: currentTokens, activeMaxCtx };
         }
-
         const safeMaxTokens = Math.min(projectedTokens, absoluteMaxSafe - currentTokens);
-        return { isSafe: true, safeMessages, safeMaxTokens, currentCount: currentTokens, activeMaxCtx };
+        return { isSafe: true, safeMessages, safeMaxTokens: Math.max(128, safeMaxTokens), currentCount: currentTokens, activeMaxCtx };
     }
 }
 
@@ -369,7 +349,6 @@ class ExecutionStrategy {
 class StandardNodeStrategy extends ExecutionStrategy {
     async execute(node, messages, vfs, statusNodeId, abortSignal) {
         if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
-
         const isStructural = !!node._json_schema || !!node._grammar_rule;
         const payload = {
             messages: messages,
@@ -379,33 +358,26 @@ class StandardNodeStrategy extends ExecutionStrategy {
             max_tokens: node._inference_parameters?.max_tokens ?? 2048,
             stream: true
         };
-
         if (node._json_schema) {
             payload.response_format = { type: "json_schema", json_schema: { name: "scribe_schema", strict: true, schema: node._json_schema } };
         } else if (node._grammar_rule) {
             payload.grammar = node._grammar_rule; 
         }
-
         const streamResult = await window.ScribeGateway.streamChat(payload, (token) => {
             if (statusNodeId && !isStructural) window.Compositor.streamToken(statusNodeId, token);
         }, abortSignal);
-
         let completeResponse = streamResult.content;
         let currentFinishReason = streamResult.finish_reason;
-
         if (!isStructural) {
             let continuationCount = 0;
             const maxContinuations = 4;
-
             while (currentFinishReason === 'length' && continuationCount < maxContinuations) {
                 continuationCount++;
                 
                 let continuationMessages = [...messages];
                 continuationMessages.push({ role: "assistant", content: completeResponse });
-
                 const horizon = await ContextMatrix.enforceContextBounds(continuationMessages, payload.max_tokens, statusNodeId, abortSignal);
                 if (!horizon.isSafe || horizon.safeMaxTokens < 64) break;
-
                 let nextPayload = {
                     messages: horizon.safeMessages,
                     temperature: payload.temperature,
@@ -414,16 +386,13 @@ class StandardNodeStrategy extends ExecutionStrategy {
                     max_tokens: horizon.safeMaxTokens,
                     stream: true
                 };
-
                 const nextResult = await window.ScribeGateway.streamChat(nextPayload, (token) => {
                     completeResponse += token;
                     if (statusNodeId) window.Compositor.streamToken(statusNodeId, token);
                 }, abortSignal);
-
                 currentFinishReason = nextResult.finish_reason;
             }
         }
-
         return completeResponse;
     }
 }
@@ -436,12 +405,9 @@ class MCTSNodeStrategy extends ExecutionStrategy {
         
         let bestCandidateTotal = "";
         let currentMessages = [...messages];
-
         window.Compositor.streamToken(statusNodeId, `\n  *Initiating Parallel DisCIPL Search (Depth: ${maxDepth}, Slots: ${candidatesCount})...*\n`);
-
         for (let depth = 0; depth < maxDepth; depth++) {
             if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
-
             const projectedTokens = node._inference_parameters?.max_tokens ?? 2048;
             const horizon = await ContextMatrix.enforceContextBounds(currentMessages, projectedTokens, statusNodeId, abortSignal, candidatesCount);
             
@@ -449,9 +415,7 @@ class MCTSNodeStrategy extends ExecutionStrategy {
                 window.Compositor.streamToken(statusNodeId, `  > [VRAM Bounds]: Context horizon exhausted. Forcing clean trajectory convergence.\n`);
                 break;
             }
-
             window.Compositor.streamToken(statusNodeId, `  > [Depth ${depth + 1}/${maxDepth}] Spawning divergent tensor trajectories...\n`);
-
             const candidatePromises = [];
             for (let i = 0; i < candidatesCount; i++) {
                 const branchPayload = { 
@@ -493,21 +457,16 @@ class MCTSNodeStrategy extends ExecutionStrategy {
                         return null;
                     }));
             }
-
             const candidates = (await Promise.all(candidatePromises)).filter(c => c !== null);
-
             if (candidates.length === 0) throw new Error("Complete hardware slot failure.");
             if (candidates.length === 1) {
                 bestCandidateTotal += (depth === 0 ? "" : "\n") + candidates[0];
                 currentMessages.push({ role: "assistant", content: candidates[0] });
                 continue;
             }
-
             window.Compositor.streamToken(statusNodeId, `  > Critic Node: Enforcing Schema Heuristics...\n`);
-
             const evalContent = `Evaluate the following ${candidates.length} candidates based on this strict objective: ${node._evaluator_instruction}\n\n` + 
                 candidates.map((c, i) => `<candidate index="${i}">\n${c}\n</candidate>`).join('\n\n');
-
             const evalPayload = {
                 messages: [{ role: "user", content: evalContent }],
                 temperature: 0.01, 
@@ -531,10 +490,8 @@ class MCTSNodeStrategy extends ExecutionStrategy {
                     }
                 }
             };
-
             let bestIndex = 0;
             let isResolved = false;
-
             try {
                 if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
                 const evalRes = await window.ScribeGateway._dispatch('/api/chat', evalPayload, { signal: abortSignal });
@@ -551,12 +508,10 @@ class MCTSNodeStrategy extends ExecutionStrategy {
                 window.Compositor.streamToken(statusNodeId, `  > [Critic Fault]: Initiating Verification Cycle...\n`);
                 bestIndex = 0; 
             }
-
             const winningText = candidates[bestIndex];
             window.Compositor.streamToken(statusNodeId, `  > Branch ${bestIndex} accepted mathematically. Pruning dead paths.\n`);
             
             bestCandidateTotal += (depth === 0 ? "" : "\n") + winningText;
-
             if (isResolved || depth === maxDepth - 1) {
                 if (isResolved && maxDepth > 1) window.Compositor.streamToken(statusNodeId, `  > Ground truth achieved early. Collapsing graph.\n`);
                 break;
@@ -574,12 +529,9 @@ class RLMNodeStrategy extends ExecutionStrategy {
         const maxCycles = node._max_rlm_cycles || 10;
         let currentMessages = [...messages];
         let cumulativeOutput = "";
-
         window.Compositor.streamToken(statusNodeId, `\n  *Initiating Recursive Language Model (RLM) Sandbox (Max Cycles: ${maxCycles})...*\n`);
-
         for (let cycle = 1; cycle <= maxCycles; cycle++) {
             if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
-
             const projectedTokens = node._inference_parameters?.max_tokens ?? 2048;
             const horizon = await ContextMatrix.enforceContextBounds(currentMessages, projectedTokens, statusNodeId, abortSignal);
             
@@ -587,9 +539,7 @@ class RLMNodeStrategy extends ExecutionStrategy {
                 window.Compositor.streamToken(statusNodeId, `  > [VRAM Bounds]: Latent recursion limits breached. Terminating RLM.\n`);
                 break;
             }
-
             window.Compositor.streamToken(statusNodeId, `  > [Cycle ${cycle}/${maxCycles}] Synthesizing latent operations...\n`);
-
             const iterPayload = { 
                 messages: horizon.safeMessages, 
                 temperature: Math.max(0.01, node._inference_parameters?.temperature ?? 0.1),
@@ -622,12 +572,10 @@ class RLMNodeStrategy extends ExecutionStrategy {
             
             cumulativeOutput += "\n" + rawOutput;
             currentMessages.push({ role: "assistant", content: rawOutput });
-
             if (LexicalAutomaton.hasStatus(rawOutput, "resolved")) {
                 window.Compositor.streamToken(statusNodeId, `  > Recursive Loop Terminated: Ground truth converged.\n`);
                 break;
             }
-
             const codeBlock = LexicalAutomaton.extractBlock(rawOutput, "rlm_exec");
             if (codeBlock) {
                 const replResult = await this._evaluateInWorkerSandbox(codeBlock, vfs, 10000, abortSignal);
@@ -644,7 +592,6 @@ class RLMNodeStrategy extends ExecutionStrategy {
     _evaluateInWorkerSandbox(code, vfs, timeoutMs, abortSignal) {
         return new Promise((resolve, reject) => {
             if (abortSignal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
-
             const workerCode = `
                 const _securePostMessage = self.postMessage.bind(self);
                 
@@ -655,15 +602,14 @@ class RLMNodeStrategy extends ExecutionStrategy {
                             writable: false, 
                             configurable: false 
                         });
-                    } catch(e) {}
+                    } catch(apiErr) {}
                 });
                 
                 try {
                     Object.freeze(Object.prototype);
                     Object.freeze(Array.prototype);
                     Object.freeze(String.prototype);
-                } catch(e) {}
-
+                } catch(freezeErr) {}
                 const pendingRequests = new Map();
                 let requestCounter = 0;
                 
@@ -710,12 +656,9 @@ class RLMNodeStrategy extends ExecutionStrategy {
                 if (isError) reject(payload);
                 else resolve(payload);
             };
-
             const abortHandler = () => terminateSandbox(new DOMException("Aborted", "AbortError"), true);
             if (abortSignal) abortSignal.addEventListener('abort', abortHandler);
-
             const timeoutId = setTimeout(() => terminateSandbox("TIMEOUT FAULT: Evaluation exceeded compute bounds."), timeoutMs);
-
             worker.onmessage = (e) => {
                 const msg = e.data;
                 if (msg.type === 'vfs_request') {
@@ -749,7 +692,6 @@ class InfillNodeStrategy extends ExecutionStrategy {
         
         const prefix = vfs.get(node._infill_prefix) || "";
         const suffix = vfs.get(node._infill_suffix) || "";
-
         const payload = {
             input_prefix: prefix,
             input_suffix: suffix,
@@ -758,7 +700,6 @@ class InfillNodeStrategy extends ExecutionStrategy {
             max_tokens: node._inference_parameters?.max_tokens ?? 2048,
             stream: false
         };
-
         const response = await window.ScribeGateway._dispatch('/api/infill', payload, { signal: abortSignal });
         const data = await response.json();
         const content = data.content || "";
@@ -830,18 +771,14 @@ class NeuralEngine {
         const marker = String.fromCharCode(96, 96, 96);
         let searchIdx = 0;
         let filesExtracted = 0;
-
         while (true) {
             const startMarkerIdx = text.indexOf(marker, searchIdx);
             if (startMarkerIdx === -1) break;
-
             const newlineIdx = text.indexOf('\n', startMarkerIdx);
             if (newlineIdx === -1) break;
-
             const header = text.substring(startMarkerIdx + 3, newlineIdx).replace(/\r/g, '').trim();
             const endMarkerIdx = text.indexOf(marker, newlineIdx);
             if (endMarkerIdx === -1) break;
-
             const content = text.substring(newlineIdx + 1, endMarkerIdx).replace(/\r/g, '').trim();
             const headerParts = header.split(':');
             
@@ -862,12 +799,10 @@ class NeuralEngine {
         
         const statusNodeId = window.Compositor.appendMessage('assistant', '', []);
         window.Compositor.streamToken(statusNodeId, "*Initiating Tri-Buffer Cognitive Graph...*\n");
-
         const fullState = window.Scribe.getConversationState().filter(m => m.role !== 'system');
         const historicalState = fullState.slice(0, -1); 
         const recentState = historicalState.slice(-this.memoryWindow);
         const { prunedHistory } = this._extractAndPruneHistory(recentState);
-
         let historyTranscript = prunedHistory.map(m => `[${m.role.toUpperCase()}]:\n${m.content}`).join('\n\n---\n\n');
         
         let activeMaxCtx = 8192;
@@ -881,12 +816,10 @@ class NeuralEngine {
                 if (!isNaN(parsed) && parsed > 0) activeMaxCtx = parsed;
             }
         }
-
         const maxHistoryChars = Math.floor(activeMaxCtx * 0.4) * 4;
         if (historyTranscript.length > maxHistoryChars) {
             historyTranscript = "...[HISTORY COMPRESSED TO PRESERVE VRAM]...\n\n" + historyTranscript.slice(-(maxHistoryChars - 50));
         }
-
         let focalObjective = task;
         if (!focalObjective || String(focalObjective).trim() === '') {
             const pastUserMsgs = prunedHistory.filter(m => m.role === 'user');
@@ -897,22 +830,18 @@ class NeuralEngine {
                 focalObjective = "Analyze the conversational context and proceed with logical synthesis.";
             }
         }
-
         let isComplete = false;
         let scriptIteration = 1;
         let finalResponseProse = "";
         let finalCodePayload = "";
         let targetLanguage = "text";
-
         while (!isComplete && scriptIteration <= 5) {
-            
             const initialMemory = {
                 "_user_request": focalObjective,
                 "user_request": focalObjective,
                 "_recent_chat_history": historyTranscript,
                 "recent_chat_history": historyTranscript
             };
-
             let targetBlueprintPath = 'grammars/cognitive_base.json'; 
             
             try {
@@ -948,12 +877,10 @@ class NeuralEngine {
             window.Compositor.streamToken(statusNodeId, `> Topology localized: [${targetBlueprintPath}] (Iteration ${scriptIteration})\n\n---\n`);
             
             const finalVfs = await this._runGraph(targetBlueprintPath, initialMemory, statusNodeId, abortSignal, visualContext, focalObjective);
-
             if (!finalVfs) {
                 window.Compositor.finalizeMessage(statusNodeId);
                 return null;
             }
-
             finalResponseProse = finalVfs.get("message_to_user") || finalVfs.get("_message_to_user") || "";
             let optimalCode = finalVfs.get("optimal_code") || finalVfs.get("_full_code_output") || "";
             targetLanguage = finalVfs.get("code_language") || finalVfs.get("_code_language") || "text";
@@ -964,13 +891,11 @@ class NeuralEngine {
                 if (filesCount > 0) {
                     window.Compositor.streamToken(statusNodeId, `\n>[SYSTEM: Synchronized ${filesCount} artifacts to Memory State]\n`);
                 }
-
                 if (optimalCode.includes("PARTIAL_AWAITING_NEXT_SCRIPT")) {
                     deliveryStatus = "PARTIAL";
                 }
                 finalCodePayload = optimalCode;
             }
-
             if (deliveryStatus === "PARTIAL") {
                 scriptIteration++;
                 focalObjective = `[SYSTEM: Script iteration ${scriptIteration-1} successfully sealed in VFS. Buffer B updated. Proceed with the next partial sequence for the original objective.]\n\nOriginal Objective:\n${task}`;
@@ -980,7 +905,6 @@ class NeuralEngine {
                 window.Compositor.streamToken(statusNodeId, `\n\nGraph Resolved.\n`);
             }
         }
-
         let rawOutput = finalResponseProse;
         if (finalCodePayload && finalCodePayload.trim().length > 0) {
             if (finalCodePayload.includes('"target_schema"') && finalCodePayload.includes('{')) {
@@ -989,11 +913,9 @@ class NeuralEngine {
                 rawOutput += (rawOutput ? "\n\n" : "") + `<artifact identifier="compiled_artifact.${targetLanguage}" language="${targetLanguage}">\n${finalCodePayload.trim()}\n</artifact>`;
             }
         }
-
         if (!rawOutput) rawOutput = "Task synthesized.";
         window.Compositor.streamToken(statusNodeId, `\n\n${rawOutput}`);
         window.Compositor.finalizeMessage(statusNodeId);
-
         return { prose: rawOutput.trim(), codePayload: null, codeLanguage: 'text' };
     }
 
@@ -1004,11 +926,9 @@ class NeuralEngine {
         for (const [k, v] of Object.entries(initialMemory)) {
             if (blueprint._memory_struct.includes(k)) vfs.write(k, v);
         }
-
         let currentNodeId = blueprint._start_node;
         let cycles = 0;
         const maxCycles = blueprint._max_cycles || 10;
-
         while (currentNodeId && currentNodeId !== "EXIT_SUCCESS" && cycles < maxCycles) {
             if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
             
@@ -1019,9 +939,7 @@ class NeuralEngine {
                 if (statusNodeId) window.Compositor.streamToken(statusNodeId, `\n\n**[Path Error]:** Dead node: ${currentNodeId}. Halting.\n`);
                 break;
             }
-
             if (statusNodeId) window.Compositor.streamToken(statusNodeId, `> Executing DAG Node: \`${currentNodeId}\`\n`);
-
             let vfsStateXml = "<vfs_state>\n";
             if (this.globalVFS.size > 0) {
                 for (let [filename, content] of this.globalVFS.entries()) {
@@ -1031,7 +949,6 @@ class NeuralEngine {
                 vfsStateXml += "\n";
             }
             vfsStateXml += "</vfs_state>";
-
             const memoryData = vfs.read(node._read_memory);
             
             const template = "<context>\n{{BUFFER_A}}\n\n{{BUFFER_B}}\n</context>\n\n<directive>\n{{BUFFER_C}}\n</directive>";
@@ -1041,12 +958,10 @@ class NeuralEngine {
                 .replace('{{BUFFER_B}}', vfsStateXml)
                 .replace('{{BUFFER_C}}', (node._task_instruction || "") + (focalAnchor ? `\n\n[Active Objective]:\n${focalAnchor}` : ""))
                 .trim();
-
             const messages = [];
             if (blueprint._system_root_instruction && blueprint._system_root_instruction.trim() !== "") {
                 messages.push({ role: "system", content: blueprint._system_root_instruction.trim() });
             }
-
             let finalUserContent = userContentStr || "Proceed.";
             if (visualContext && visualContext.length > 0) {
                 const payloadArray = [{ type: "text", text: finalUserContent }];
@@ -1055,9 +970,7 @@ class NeuralEngine {
                 });
                 finalUserContent = payloadArray;
             }
-
             messages.push({ role: "user", content: finalUserContent });
-
             const projectedMaxTokens = node._inference_parameters?.max_tokens ?? 3072;
             const horizon = await ContextMatrix.enforceContextBounds(messages, projectedMaxTokens, statusNodeId, abortSignal);
             
@@ -1065,14 +978,12 @@ class NeuralEngine {
                 if (statusNodeId) window.Compositor.streamToken(statusNodeId, `\n\n**[VRAM Fault]:** Graph trajectory exceeds physical context horizon (${horizon.currentCount}/${horizon.activeMaxCtx}). Emergency halt.\n`);
                 break;
             }
-
             try {
                 const completeResponse = await this.dispatcher.dispatch(node, horizon.safeMessages, vfs, statusNodeId, abortSignal);
                 
                 if (statusNodeId && node._mode === "mcts" && !node._json_schema && !node._grammar_rule) {
                     window.Compositor.streamToken(statusNodeId, `\n<details class="scribe-thought-block"><summary class="thought-header">DAG Telemetry: ${currentNodeId}</summary><div class="thought-content">Latent Artifact Synthesized and stored in Virtual File System.</div></details>\n`);
                 }
-
                 if (node._write_memory) vfs.write(node._write_memory, completeResponse, node._write_mode || "overwrite");
                 currentNodeId = DAGLogicEvaluator.evaluateNextStep(completeResponse, node._next_step_logic);
             } catch (e) {
@@ -1081,11 +992,9 @@ class NeuralEngine {
                 break;
             }
         }
-
         if (cycles >= maxCycles && currentNodeId !== "EXIT_SUCCESS" && statusNodeId) {
             window.Compositor.streamToken(statusNodeId, `\n\n*Warning: Recursive iteration bound (${maxCycles}) exceeded.*\n`);
         }
-
         return vfs;
     }
 }

@@ -42,14 +42,10 @@ _adapter = HTTPAdapter(pool_connections=100, pool_maxsize=100)
 PROXY_SESSION.mount('http://', _adapter)
 PROXY_SESSION.mount('https://', _adapter)
 
-# ==============================================================================
-# HERMETIC HARDWARE TOPOLOGY STATE ENGINE (UNPOISONED & OS-GNOSTIC)
-# ==============================================================================
-_LOCKED_TOPOLOGY = None  # Freezes to: "NVIDIA_CUDA", "AMD_HIP", "INTEL_XPU", "APPLE_METAL", or "CPU_NATIVE"
+_LOCKED_TOPOLOGY = None 
 _HERMETIC_HIP_PATH = None
 
 def find_hermetic_hipinfo() -> Optional[str]:
-    """Shallow fast-finder for the un-wrapped local hipinfo binary."""
     global _HERMETIC_HIP_PATH
     if _HERMETIC_HIP_PATH:
         return _HERMETIC_HIP_PATH
@@ -98,7 +94,6 @@ def query_nvidia_cuda(kwargs) -> Optional[dict]:
     return None
 
 def query_amd_hip(kwargs) -> Optional[dict]:
-    """Isolated AMD HIP telemetry collection using standalone vendored context loops."""
     hip_path = find_hermetic_hipinfo()
     if not hip_path:
         return None
@@ -123,7 +118,6 @@ def query_amd_hip(kwargs) -> Optional[dict]:
     return None
 
 def query_intel_xpu(kwargs) -> Optional[dict]:
-    """Isolated Intel XPU telemetry collection aligned to setup_pytorch ground truth matrix."""
     try:
         if os.name == 'nt':
             cmd = ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'Intel' -and ($_.Name -match 'Arc' -or $_.Name -match 'Iris' -or $_.Name -match 'Ultra' -or $_.Name -match 'Graphics') } | Select-Object Name, AdapterRAM | ConvertTo-Json -Compress"]
@@ -134,7 +128,7 @@ def query_intel_xpu(kwargs) -> Optional[dict]:
                 if cim_data and cim_data[0].get("Name"):
                     ram_val = float(cim_data[0].get("AdapterRAM", 0))
                     if ram_val < 0 or ram_val == 4294967295 or ram_val == 2147483647:
-                        ram_val = 8589934592  # Safe 8GB default bound for over-4GB rollover conditions
+                        ram_val = 8589934592  
                     total_mb = ram_val / (1024 * 1024)
                     return {"type": cim_data[0]["Name"], "vram_total": total_mb, "vram_free": total_mb * 0.70}
         else:
@@ -152,7 +146,6 @@ def query_intel_xpu(kwargs) -> Optional[dict]:
     return None
 
 def query_apple_metal() -> Optional[dict]:
-    """Isolated Apple Silicon Unified Memory telemetry collection. Starves non-macOS loops instantly."""
     if sys.platform != "darwin":
         return None
     try:
@@ -163,10 +156,6 @@ def query_apple_metal() -> Optional[dict]:
     except Exception: pass
     return None
 
-
-# ==============================================================================
-# PLATFORM TELEMETRY ORCHESTRATOR
-# ==============================================================================
 class SystemProfiler:
     _cache = {"type": "CPU Native", "vram_total": 0.0, "vram_free": 0.0, "ram_total": 0.0, "ram_free": 0.0}
     _lock = threading.Lock()
@@ -192,7 +181,6 @@ class SystemProfiler:
         telemetry = {"type": "CPU Native", "vram_total": 0.0, "vram_free": 0.0, "ram_total": 0.0, "ram_free": 0.0}
         kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW | 0x04000000} if os.name == 'nt' else {}
 
-        # 1. Asynchronous Host System RAM Probe (OS Isolated Paths)
         try:
             if os.name == 'nt':
                 cmd_ram = ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory | ConvertTo-Json -Compress"]
@@ -225,7 +213,6 @@ class SystemProfiler:
                     telemetry["ram_free"] = round(m_avail, 2)
         except Exception: pass
 
-        # 2. Stateful Compute Evaluation and Pinned Execution
         if _LOCKED_TOPOLOGY is not None:
             if _LOCKED_TOPOLOGY == "NVIDIA_CUDA":
                 gpu_data = query_nvidia_cuda(kwargs)
@@ -241,7 +228,6 @@ class SystemProfiler:
             if gpu_data:
                 telemetry.update(gpu_data)
         else:
-            # Cold boot discovery sequence: Locks system hardware pathing exactly once
             gpu_data = query_nvidia_cuda(kwargs)
             if gpu_data:
                 _LOCKED_TOPOLOGY = "NVIDIA_CUDA"
@@ -403,10 +389,6 @@ class EngineDispatcher:
     def list_models(self) -> List[str]: return [f for f in os.listdir(MODELS_DIR) if f.endswith(".gguf")]
     
     def _find_mmproj(self, model_name: str) -> Optional[str]:
-        """
-        Pure primitive left-to-right character sweep. Relies entirely on natural 
-        score accumulation. True 0 occurs naturally on zero prefix alignment.
-        """
         model_low = model_name.lower().replace(".gguf", "")
         if "mmproj" in model_low:
             return None
@@ -539,12 +521,8 @@ class EngineDispatcher:
         threads = config.get("threads", 8)
         parallel_slots = config.get("parallel_slots", 6)
         
-        base_slot_multiplier = 512 if parallel_slots > 1 else 1024
-        batch_size = max(config.get("batch_size", 1024), parallel_slots * base_slot_multiplier)
-        
-        raw_u = batch_size // parallel_slots
-        u_batch = (raw_u // 128) * 128 if raw_u >= 128 else (64 if raw_u >= 64 else 32)
-        u_batch = max(64, u_batch)
+        batch_size = max(config.get("batch_size", 2048), 2048)
+        u_batch = min(batch_size, config.get("u_batch", batch_size))
 
         args = [
             bin_path, "--model", llm_path, "--host", "127.0.0.1", "--port", str(LLAMA_PORT), 
@@ -758,6 +736,9 @@ class ScribeGatewayHandler(SimpleHTTPRequestHandler):
 
     def _proxy_request(self, target_path: str, payload: dict, is_streaming: bool = False):
         if isinstance(payload, dict):
+            if target_path in ['/completion', '/infill']:
+                payload["cache_prompt"] = True
+                
             def _excise_harmful_parameters(obj: Any):
                 if isinstance(obj, dict):
                     obj.pop("top_k", None)
