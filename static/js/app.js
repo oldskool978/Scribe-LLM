@@ -588,7 +588,8 @@ class ScribeOrchestrator {
             this.dom.threadsSlider.addEventListener('input', (e) => this.dom.threadsDisplay.textContent = e.target.value);
         }
 
-        this.dom.btnMasterPower.addEventListener('click', async () => {
+        this.dom.btnMasterPower.addEventListener('click', async (e) => {
+            e.preventDefault();
             if (this.state.engineStatus === 'ready' || this.state.engineStatus === 'error') {
                 try { await window.ScribeGateway.haltEngine(); } 
                 catch (e) {}
@@ -692,7 +693,8 @@ class ScribeOrchestrator {
             }
         });
         
-        this.dom.submitBtn.addEventListener('click', () => {
+        this.dom.submitBtn.addEventListener('click', (e) => {
+            e.preventDefault();
             if (this.state.isHalting) return; 
             
             if (this.state.isInferring) {
@@ -801,9 +803,13 @@ class ScribeOrchestrator {
         if (history.length > windowSize) history = history.slice(-windowSize);
 
         let safeMessages = [sysMsg, ...history];
-        let safeMaxTokens = parseInt(this.dom.paramMaxTokens.value);
+        const requestedMaxTokens = parseInt(this.dom.paramMaxTokens.value) || 2048;
+        const executionFloor = 512;
 
-        while (safeMessages.length > 1) {
+        const dynamicMargin = activeMaxCtx > 16384 ? 0.95 : 0.90;
+        const absoluteMaxSafe = Math.floor(activeMaxCtx * dynamicMargin);
+
+        while (true) {
             let normalizedMessages = safeMessages.map(m => {
                 let normalizedContent = m.content;
                 if (m.msgId && window.Compositor && window.Compositor.messageRegistry && window.Compositor.messageRegistry.has(m.msgId)) {
@@ -836,23 +842,22 @@ class ScribeOrchestrator {
                 currentCount = Math.floor(textContent.length / 3.5);
             }
 
-            const dynamicMargin = activeMaxCtx > 16384 ? 0.95 : 0.90;
-            const absoluteMaxSafe = Math.floor(activeMaxCtx * dynamicMargin);
+            let availableHeadroom = absoluteMaxSafe - currentCount;
 
-            if (currentCount >= absoluteMaxSafe) {
+            if (safeMessages.length > 1 && (availableHeadroom < executionFloor || currentCount >= absoluteMaxSafe)) {
                 if (safeMessages.length > 2) {
-                    safeMessages.splice(1, 2); 
+                    safeMessages.splice(1, 2);
                 } else {
                     safeMessages.splice(1, 1);
                 }
             } else {
-                safeMaxTokens = Math.min(parseInt(this.dom.paramMaxTokens.value), Math.max(1, absoluteMaxSafe - currentCount));
-                safeMessages = normalizedMessages;
-                break;
+                let safeMaxTokens = Math.min(requestedMaxTokens, Math.max(executionFloor, availableHeadroom));
+                if (availableHeadroom < executionFloor) {
+                    safeMaxTokens = Math.max(64, availableHeadroom);
+                }
+                return { safeMessages: normalizedMessages, safeMaxTokens };
             }
         }
-
-        return { safeMessages, safeMaxTokens };
     }
 
     async executeInference() {

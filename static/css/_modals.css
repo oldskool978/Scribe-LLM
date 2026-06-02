@@ -2,7 +2,7 @@
 
 /**
  * Scribe-LLM Visual Engine: Modal & Topology Matrix
- * Domain: Ephemeral Overlays, Acquisition Subservice, Chat Physics, and Reasoning Artifacts
+ * Domain: Ephemeral Overlays, Acquisition Subservice, and Isolated Panels
  */
 
 /* ==========================================================================
@@ -10,7 +10,10 @@
    ========================================================================== */
 .modal-backdrop {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0; 
+    left: 0; 
+    right: 0; 
+    bottom: 0;
     background-color: rgba(9, 9, 11, 0.8);
     backdrop-filter: blur(8px);
     z-index: 999;
@@ -23,9 +26,9 @@
     z-index: 1049;
 }
 
-.modal-backdrop.hidden { 
-    opacity: 0; 
-    pointer-events: none; 
+.modal-backdrop.hidden {
+    opacity: 0;
+    pointer-events: none;
 }
 
 .control-modal {
@@ -47,19 +50,24 @@
     will-change: transform, opacity;
 }
 
-.modal-backdrop.tier-2 .control-modal,
+.modal-backdrop.tier-2 .control-modal, 
 .control-modal.tier-2 {
     z-index: 1050;
     box-shadow: 0 32px 64px rgba(0, 0, 0, 0.7);
 }
 
-#modal-hardware-topology { max-width: 600px; }
-#modal-inference-physics { max-width: 540px; }
+#modal-hardware-topology { 
+    max-width: 600px; 
+}
 
-.expanded-modal { 
-    max-width: 900px !important; 
-    width: 90vw !important; 
-    max-height: 80vh !important; 
+#modal-inference-physics { 
+    max-width: 540px; 
+}
+
+.expanded-modal {
+    max-width: 900px !important;
+    width: 90vw !important;
+    max-height: 80vh !important;
 }
 
 .control-modal.hidden {
@@ -108,10 +116,23 @@
     margin: 0 0 16px 0;
 }
 
-.p-0 { padding: 0 !important; }
-.overflow-hidden { overflow: hidden !important; }
-.control-group { margin-bottom: 16px; }
-.grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.p-0 { 
+    padding: 0 !important; 
+}
+
+.overflow-hidden { 
+    overflow: hidden !important; 
+}
+
+.control-group { 
+    margin-bottom: 16px; 
+}
+
+.grid-2-col { 
+    display: grid; 
+    grid-template-columns: 1fr 1fr; 
+    gap: 16px; 
+}
 
 .hardware-toggles {
     display: grid;
@@ -127,7 +148,10 @@
 
 .drop-overlay {
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0; 
+    left: 0; 
+    right: 0; 
+    bottom: 0;
     background-color: rgba(9, 9, 11, 0.8);
     backdrop-filter: blur(4px);
     z-index: 100;
@@ -141,21 +165,55 @@
     color: var(--text-primary);
     pointer-events: none;
 }
-.drop-overlay.hidden { display: none; }
+
+.drop-overlay.hidden { 
+    display: none; 
+}
 
 /* ==========================================================================
    Acquisition Matrix (Subservice Injection)
    ========================================================================== */
-.flex-between { display: flex; justify-content: space-between; align-items: center; }
-.mb-0 { margin-bottom: 0 !important; }
-.mt-2 { margin-top: 8px !important; }
-.mt-3 { margin-top: 16px !important; }
-.mt-auto { margin-top: auto !important; }
-.pt-3 { padding-top: 16px !important; }
-.w-100 { width: 100% !important; }
-.shrink-0 { flex-shrink: 0; }
-.border-top-subtle { border-top: 1px solid var(--border-subtle); }
-.highlight { color: var(--accent-primary); }
+.flex-between { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+}
+
+.mb-0 { 
+    margin-bottom: 0 !important; 
+}
+
+.mt-2 { 
+    margin-top: 8px !important; 
+}
+
+.mt-3 { 
+    margin-top: 16px !important; 
+}
+
+.mt-auto { 
+    margin-top: auto !important; 
+}
+
+.pt-3 { 
+    padding-top: 16px !important; 
+}
+
+.w-100 { 
+    width: 100% !important; 
+}
+
+.shrink-0 { 
+    flex-shrink: 0; 
+}
+
+.border-top-subtle { 
+    border-top: 1px solid var(--border-subtle); 
+}
+
+.highlight { 
+    color: var(--accent-primary); 
+}
 
 .acq-grid {
     display: grid;
@@ -167,12 +225,18 @@
 }
 
 @media (max-width: 800px) {
-    .acq-grid { 
-        grid-template-columns: 1fr; 
-        grid-template-rows: 1fr 1fr; 
+    .acq-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1fr;
     }
-    .expanded-modal { width: 95vw !important; max-height: 90vh !important; }
-    .acq-left-pane { border-right: none; border-bottom: 1px solid var(--border-subtle); }
+    .expanded-modal { 
+        width: 95vw !important; 
+        max-height: 90vh !important; 
+    }
+    .acq-left-pane { 
+        border-right: none; 
+        border-bottom: 1px solid var(--border-subtle); 
+    }
 }
 
 .acq-left-pane {
@@ -206,7 +270,7 @@
     flex-shrink: 0;
 }
 
-body.scribe-dark #acq-terminal-output,
+body.scribe-dark #acq-terminal-output, 
 body.scribe-dark .terminal-body#acq-terminal-output {
     flex: 1;
     overflow-y: auto;
@@ -230,7 +294,6 @@ body.scribe-dark .terminal-body#acq-terminal-output {
 
 .terminal-status::before {
     content: '';
-    display: inline-dot;
     display: inline-block;
     width: 6px;
     height: 6px;
@@ -265,226 +328,4 @@ body.scribe-dark .terminal-body#acq-terminal-output {
     color: var(--text-muted);
     font-size: 0.8rem;
     font-style: italic;
-}
-
-/* ==========================================================================
-   Chat Viewport & Message Matrices (Topology)
-   ========================================================================= */
-.chat-viewport {
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    flex: 1;
-    overflow: hidden;
-    background-color: var(--bg-base);
-}
-
-#chat-history {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 40px;
-    display: flex;
-    flex-direction: column;
-    gap: 32px;
-    scroll-behavior: smooth;
-    padding-bottom: 20px;
-}
-
-.welcome-banner {
-    max-width: 800px;
-    margin: auto auto;
-    text-align: center;
-    color: var(--text-secondary);
-}
-.welcome-banner h2 { color: var(--text-primary); margin-bottom: 8px; }
-
-.message-node {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-width: 840px;
-    margin: 0 auto;
-    width: 100%;
-    animation: slideUp 0.3s ease forwards;
-}
-
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.node-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.node-user .node-label { color: var(--text-secondary); }
-
-.node-content {
-    font-size: 1rem;
-    line-height: 1.6;
-    color: var(--text-primary);
-}
-
-.node-user .node-content {
-    background-color: var(--bg-surface);
-    padding: 16px 20px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-subtle);
-    display: inline-block;
-    align-self: flex-start;
-}
-
-.node-visual-context {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-}
-
-.context-thumbnail {
-    height: 160px;
-    width: auto;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-subtle);
-    object-fit: contain;
-    background-color: var(--bg-base);
-}
-
-.input-orchestrator {
-    position: sticky;
-    bottom: 0;
-    padding: 16px 40px 40px;
-    background: linear-gradient(0deg, var(--bg-base) 60%, rgba(9, 9, 11, 0) 100%);
-    width: 100%;
-    max-width: 920px;
-    margin: 0 auto;
-}
-
-.orchestrator-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 12px 12px 12px;
-    width: 100%;
-}
-
-#compositor-node { transition: opacity 0.4s ease; }
-
-/* ==========================================================================
-   Multi-Stage Reasoning Artifacts (MCTS / DisCIPL Visuals)
-   ========================================================================== */
-details.scribe-thought-block {
-    border-left: 3px solid var(--accent-primary);
-    background-color: rgba(99, 102, 241, 0.05);
-    margin: 16px 0;
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    color: var(--text-secondary);
-    font-family: var(--font-ui);
-    overflow: hidden;
-    transition: all var(--transition-snappy);
-}
-
-summary.thought-header {
-    cursor: pointer;
-    user-select: none;
-    padding: 12px 16px;
-    margin-bottom: 0;
-    font-family: var(--font-code);
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--accent-primary);
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background-color: rgba(0, 0, 0, 0.2);
-    transition: background-color 0.2s ease;
-}
-
-summary.thought-header:hover { background-color: rgba(99, 102, 241, 0.1); }
-summary.thought-header::-webkit-details-marker { display: none; }
-
-summary.thought-header::before {
-    content: '▶';
-    display: inline-block;
-    font-size: 0.7em;
-    transition: transform var(--transition-snappy);
-}
-
-details[open] summary.thought-header::before { transform: rotate(90deg); }
-
-.thought-content {
-    padding: 16px 20px;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    border-top: 1px solid rgba(99, 102, 241, 0.1);
-    animation: fadeIn 0.3s ease-in-out;
-}
-
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-.scribe-thought-block p { margin-bottom: 0.75em; }
-.scribe-thought-block p:last-child { margin-bottom: 0; }
-
-.scribe-candidate-block {
-    border-left: 2px dashed var(--border-focus);
-    padding: 12px 16px;
-    margin: 12px 0;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-}
-
-.candidate-header {
-    font-family: var(--font-code);
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.scribe-evaluation {
-    background: rgba(244, 244, 245, 0.05);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 10px 14px;
-    font-size: 0.85rem;
-    font-family: var(--font-ui);
-    margin: 12px 0;
-    color: var(--text-secondary);
-}
-
-.scribe-evaluation strong { color: var(--text-primary); font-weight: 600; }
-
-.scribe-winner {
-    color: var(--accent-hover);
-    font-family: var(--font-code);
-    font-size: 0.8rem;
-    margin: 12px 0;
-    padding-left: 8px;
-    border-left: 2px solid var(--accent-hover);
-}
-
-.scribe-status-badge.resolved {
-    display: inline-flex;
-    align-items: center;
-    background-color: rgba(16, 185, 129, 0.1);
-    color: var(--status-ready);
-    border: 1px solid rgba(16, 185, 129, 0.3);
-    padding: 6px 12px;
-    border-radius: var(--radius-md);
-    font-size: 0.75rem;
-    font-family: var(--font-code);
-    font-weight: 600;
-    margin: 16px 0;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    box-shadow: 0 0 12px rgba(16, 185, 129, 0.1);
 }

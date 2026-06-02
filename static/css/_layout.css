@@ -12,8 +12,8 @@
 body.scribe-dark {
     margin: 0;
     padding: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100dvh; /* Safeguards against mobile address bar reflow breakages */
     overflow: hidden;
     background-color: var(--bg-base);
     color: var(--text-primary);
@@ -31,7 +31,7 @@ body.scribe-dark {
     position: relative;
 }
 
-/* Scrollbar Physics */
+/* Scrollbar Physics Restructuring */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -89,4 +89,18 @@ body.scribe-dark {
     letter-spacing: -0.02em;
     margin: 0;
     color: var(--text-primary);
+}
+
+/* ==========================================================================
+   SUPERIOR ENGINEERING PARADIGM: Elastic Viewport Layout Constraint
+   ========================================================================== */
+.chat-viewport {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0; /* Prevents container flex tracking overflow expansion drops */
+    overflow: hidden;
+    position: relative;
+    background-color: var(--bg-base);
 }
