@@ -99,7 +99,7 @@ def hydrate_pytorch():
                 subprocess.check_call(pip_cmd + ["--index-url", f"https://rocm.nightlies.amd.com/v2-staging/{url_param}/", "--pre", "-U", "torch", "torchaudio", "torchvision"])
             else:
                 # Upstream Linux ROCm Wheels are hosted natively on standard PyTorch indices
-                subprocess.check_call(pip_cmd + ["--index-url", "https://download.pytorch.org/whl/rocm6.0", "-U", "torch", "torchvision", "torchaudio"])
+                subprocess.check_call(pip_cmd + ["--index-url", "https://download.pytorch.org/whl/nightly/rocm7.2", "--pre", "-U", "torch", "torchvision", "torchaudio"])
         
         elif profile == "CUDA_12":
             subprocess.check_call(pip_cmd + ["--index-url", "https://download.pytorch.org/whl/cu121", "--pre", "-U", "torch", "torchvision", "torchaudio"])
