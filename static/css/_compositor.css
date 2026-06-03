@@ -1,14 +1,19 @@
 /* Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md. */
 
+:root {
+    --message-max-width: 920px;
+    --asset-width-default: 100%;
+}
+
 .welcome-banner {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    max-width: 920px;
+    max-width: var(--message-max-width);
     margin: 120px auto 0 auto;
-    width: 100%;
+    width: var(--asset-width-default);
     padding: 40px;
     background: rgba(255, 255, 255, 0.01);
     border: 1px solid var(--border-subtle);
@@ -60,8 +65,8 @@
 #chat-history {
     position: relative;
     flex: 1 1 auto;
-    width: 100%;
-    max-width: 100%;
+    width: var(--asset-width-default);
+    max-width: var(--asset-width-default);
     min-height: 0;
     overflow-y: scroll;
     overflow-x: hidden;
@@ -80,9 +85,9 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    max-width: 920px;
+    max-width: var(--message-max-width);
     margin: 0 auto;
-    width: 100%;
+    width: var(--asset-width-default);
     box-sizing: border-box;
     animation: slideUp 0.3s ease forwards;
     contain: layout style;
@@ -136,8 +141,8 @@
 
 .node-content {
     min-width: 0;
-    max-width: 100%;
-    width: 100%;
+    max-width: var(--asset-width-default);
+    width: var(--asset-width-default);
     overflow-wrap: anywhere;
     word-break: break-word;
     box-sizing: border-box;
@@ -156,9 +161,9 @@
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-subtle);
     display: block;
-    align-self: flex-start;
-    max-width: var(--user-bubble-max-width, 85%);
-    width: auto;
+    align-self: stretch;
+    max-width: var(--message-max-width);
+    width: var(--asset-width-default);
 }
 
 .input-orchestrator {
@@ -166,7 +171,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    width: 100%;
+    width: var(--asset-width-default);
     max-width: none;
     padding: 16px 24px 40px 24px;
     background: var(--bg-base);
@@ -179,10 +184,10 @@
 .input-orchestrator > .media-staging-tray,
 .input-orchestrator > .staging-tray,
 .input-orchestrator > .input-wrapper {
-    max-width: 920px;
+    max-width: var(--message-max-width);
     margin-left: auto;
     margin-right: auto;
-    width: 100%;
+    width: var(--asset-width-default);
     box-sizing: border-box;
 }
 
@@ -191,7 +196,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 12px 12px 12px;
-    width: 100%;
+    width: var(--asset-width-default);
     box-sizing: border-box;
 }
 
@@ -201,8 +206,8 @@
     margin: 1.8em auto;
     padding: 0.6em 0;
     text-align: center;
-    width: 100%;
-    max-width: 100%;
+    width: var(--asset-width-default);
+    max-width: var(--asset-width-default);
     overflow-x: auto;
     overflow-y: hidden;
     font-style: normal !important;
@@ -259,8 +264,8 @@
 }
 
 .scribe-text-block {
-    width: 100%;
-    max-width: 100%;
+    width: var(--asset-width-default);
+    max-width: var(--asset-width-default);
     min-width: 0;
     box-sizing: border-box;
     contain: layout style;
@@ -268,7 +273,7 @@
 
 .scribe-text-block.scribe-code-native,
 .scribe-text-block.scribe-artifact-native {
-    max-width: 100%;
+    max-width: var(--asset-width-default);
 }
 
 .scribe-math-raw {
@@ -282,7 +287,7 @@
 
 .scribe-ace-wrapper {
     position: relative;
-    width: 100%;
+    width: var(--asset-width-default);
     margin: 1.5em 0;
     border-radius: var(--radius-md, 8px);
     border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
@@ -339,7 +344,7 @@
 .scribe-ace-editor {
     min-height: 80px;
     height: auto;
-    width: 100%;
+    width: var(--asset-width-default);
     display: block;
     text-align: initial;
     direction: ltr;
@@ -347,13 +352,13 @@
 }
 
 .scribe-markdown-preview-block {
-    width: 100%;
+    width: var(--asset-width-default);
     box-sizing: border-box;
     text-align: left;
 }
 
 .scribe-artifact-native {
-    width: 100%;
+    width: var(--asset-width-default);
     padding: 1.25em;
     background: rgba(10, 10, 15, 0.6);
     border: 1px solid rgba(0, 255, 163, 0.15);
@@ -372,7 +377,7 @@
     background-color: var(--cog-active-bg, rgba(7, 7, 10, 0.85));
     overflow: hidden;
     transition: all var(--transition-snappy, 0.15s ease);
-    width: 100%;
+    width: var(--asset-width-default);
     box-sizing: border-box;
     contain: layout style;
 }
@@ -443,7 +448,7 @@
     border-radius: var(--radius-md, 4px);
     background-color: rgba(7, 7, 10, 0.4);
     overflow: hidden;
-    width: 100%;
+    width: var(--asset-width-default);
     box-sizing: border-box;
     contain: layout style;
 }
@@ -467,7 +472,7 @@
     border-radius: var(--radius-md, 4px);
     background-color: rgba(255, 255, 255, 0.01);
     overflow: hidden;
-    width: 100%;
+    width: var(--asset-width-default);
     box-sizing: border-box;
     contain: layout style;
 }

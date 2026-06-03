@@ -104,7 +104,7 @@ class ScribeCompositor {
                                 <button class="action-btn ace-copy-btn" onclick="Compositor._handleInlineCopy(this)">Copy</button>
                             </div>
                             <div class="scribe-text-block scribe-code-native">
-                                <pre style="margin:0;"><code class="streaming-code-payload">${self._escapeHtml(code)}</code></pre>
+                                    <pre style="margin:0;"><code class="streaming-code-payload">${self._escapeHtml(code)}</code></pre>
                             </div>
                         </div>
                     `;
@@ -348,9 +348,10 @@ class ScribeCompositor {
         return attrs;
     }
 
-    _lexicalStreamParse(streamContext, newText) {
+    _lexicalStreamParse(streamContext, newText, isFinal = false) {
         let i = streamContext.cursorIndex;
         const len = newText.length;
+        const isAssistantScope = streamContext.role === 'assistant';
         
         let root = streamContext.astRoot || { type: 'root', children: [] };
         let stack = streamContext.parseStack || [root];
@@ -372,9 +373,17 @@ class ScribeCompositor {
 
         while (i < len) {
             const isEscapedToken = this._isEscaped(newText, i);
-            let structuralClosedIdx = -1;
             
-            if (!isEscapedToken) {
+            if (!isFinal && !isEscapedToken && newText[i] === '`') {
+                let tCount = 0;
+                while (i + tCount < len && newText[i + tCount] === '`') {
+                    tCount++;
+                }
+                if (i + tCount === len) break;
+            }
+
+            let structuralClosedIdx = -1;
+            if (!isEscapedToken && isAssistantScope) {
                 for (let s = stack.length - 1; s > 0; s--) {
                     const activeContainerType = stack[s].type;
                     if (ScribeCompositor.TARGET_TAGS.includes(activeContainerType)) {
@@ -423,22 +432,65 @@ class ScribeCompositor {
                     currentContext.attributes = currentContext.attributes.trim();
                     if (settled) {
                         currentContext.isLanguageSettled = true;
+                        currentContext.innerFencesCount = 0;
                     }
                     continue;
                 }
+
                 let tickCount = 0;
                 while (i + tickCount < len && newText[i + tickCount] === '`') {
                     tickCount++;
                 }
-                if (tickCount >= currentContext.fenceLength && !isEscapedToken) {
-                    currentContext.content = currentText;
-                    currentText = "";
-                    currentContext.isComplete = true;
-                    stack.pop();
+
+                if (tickCount > 0) {
+                    let isLineStart = false;
+                    if (i === 0 || newText[i - 1] === '\n') {
+                        isLineStart = true;
+                    } else {
+                        let checkIdx = i - 1;
+                        while (checkIdx >= 0 && (newText[checkIdx] === ' ' || newText[checkIdx] === '\t')) {
+                            checkIdx--;
+                        }
+                        if (checkIdx < 0 || newText[checkIdx] === '\n') isLineStart = true;
+                    }
+
+                    if (isLineStart && !isEscapedToken) {
+                        let nextIdx = i + tickCount;
+                        while (nextIdx < len && newText[nextIdx] !== '\n' && newText[nextIdx] !== '\r') {
+                            nextIdx++;
+                        }
+                        let lineTail = newText.substring(i + tickCount, nextIdx).trim();
+
+                        if (tickCount >= currentContext.fenceLength && lineTail.length === 0) {
+                            if (currentContext.innerFencesCount > 0) {
+                                currentContext.innerFencesCount--;
+                                currentText += newText.substring(i, nextIdx);
+                                i = nextIdx;
+                                continue;
+                            } else {
+                                currentContext.content = currentText;
+                                currentText = "";
+                                currentContext.isComplete = true;
+                                stack.pop();
+                                i = nextIdx;
+                                if (i < len && newText[i] === '\n') i++;
+                                continue;
+                            }
+                        } else if (lineTail.length > 0 && ['markdown', 'md'].includes((currentContext.attributes || '').toLowerCase())) {
+                            if (nextIdx === len && !isFinal) break;
+                            if (!currentContext.innerFencesCount) currentContext.innerFencesCount = 0;
+                            currentContext.innerFencesCount++;
+                            currentText += newText.substring(i, nextIdx);
+                            i = nextIdx;
+                            continue;
+                        }
+                    }
+
+                    currentText += newText.substring(i, i + tickCount);
                     i += tickCount;
-                    if (i < len && newText[i] === '\n') i++;
                     continue;
                 }
+
                 currentText += newText[i];
                 i++;
                 continue;
@@ -470,9 +522,7 @@ class ScribeCompositor {
                         break;
                     }
                 }
-                if (newText[i] === '$') {
-                    if (i + 1 === len) break;
-                }
+                if (newText[i] === '$' && i + 1 === len) break;
                 if (newText[i] === '`') {
                     let tCount = 0;
                     while (i + tCount < len && newText[i + tCount] === '`') { tCount++; }
@@ -498,38 +548,31 @@ class ScribeCompositor {
                                 }
                                 nextIdx++;
                             }
-                            if (!hasNewline) {
-                                break;
-                            }
+                            if (!hasNewline) break;
+                            
                             let langHint = '';
                             let scanIdx = i + tickCount;
                             while (scanIdx < nextIdx) {
-                                if (newText[scanIdx] !== '\r') {
-                                    langHint += newText[scanIdx];
-                                }
+                                if (newText[scanIdx] !== '\r') langHint += newText[scanIdx];
                                 scanIdx++;
                             }
                             langHint = langHint.trim();
-                            if (this._isSupportedCodeLanguage(langHint)) {
-                                flushText();
-                                let codeBlockNode = {
-                                    type: 'code_block',
-                                    content: '',
-                                    attributes: langHint,
-                                    fenceLength: tickCount,
-                                    isComplete: false,
-                                    isLanguageSettled: true,
-                                    children: []
-                                };
-                                currentContext.children.push(codeBlockNode);
-                                stack.push(codeBlockNode);
-                                i = nextIdx + 1;
-                                continue;
-                            } else {
-                                currentText += newText.substring(i, nextIdx + 1);
-                                i = nextIdx + 1;
-                                continue;
-                            }
+                            
+                            flushText();
+                            let codeBlockNode = {
+                                type: 'code_block',
+                                content: '',
+                                attributes: langHint,
+                                fenceLength: tickCount,
+                                isComplete: false,
+                                isLanguageSettled: true,
+                                innerFencesCount: 0,
+                                children: []
+                            };
+                            currentContext.children.push(codeBlockNode);
+                            stack.push(codeBlockNode);
+                            i = nextIdx + 1;
+                            continue;
                         } else {
                             streamContext.inInlineCode = true;
                             streamContext.activeInlineLength = tickCount;
@@ -549,7 +592,7 @@ class ScribeCompositor {
             }
 
             let tagMatched = false;
-            if (streamContext.mathState === 'none' && !streamContext.inInlineCode) {
+            if (streamContext.mathState === 'none' && !streamContext.inInlineCode && isAssistantScope) {
                 if (newText[i] === '<' && i + 1 < len && newText[i + 1] !== '/') {
                     let matchedTag = null;
                     for (let t = 0; t < ScribeCompositor.TARGET_TAGS.length; t++) {
@@ -611,10 +654,8 @@ class ScribeCompositor {
                             }
                         }
                     }
-                    if (newText[i] === '$') {
-                        if (i + 1 < len && newText[i+1] !== ' ' && !(newText[i+1] >= '0' && newText[i+1] <= '9')) {
-                            flushText(); streamContext.mathState = 'inline_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i++; continue;
-                        }
+                    if (newText[i] === '$' && i + 1 < len && newText[i+1] !== ' ' && !(newText[i+1] >= '0' && newText[i+1] <= '9')) {
+                        flushText(); streamContext.mathState = 'inline_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i++; continue;
                     }
                 } else {
                     if (newText[i] === '{') { streamContext.braceDepth++; streamContext.currentMathBuffer += newText[i]; i++; continue; }
@@ -681,7 +722,6 @@ class ScribeCompositor {
 
         let clonedRoot = { ...root, children: [...root.children] };
         let currentClone = clonedRoot;
-        
         for (let s = 1; s < stack.length; s++) {
             let originalNode = stack[s];
             let idx = currentClone.children.indexOf(originalNode);
@@ -692,10 +732,8 @@ class ScribeCompositor {
             }
         }
 
-        if (streamContext.mathState !== 'none') {
-            if (['block_dollar', 'block_bracket', 'env'].includes(streamContext.mathState)) {
-                currentClone.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: false, children: [] });
-            }
+        if (streamContext.mathState !== 'none' && ['block_dollar', 'block_bracket', 'env'].includes(streamContext.mathState)) {
+            currentClone.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: false, children: [] });
         }
         
         let speculativeText = currentText;
@@ -704,28 +742,19 @@ class ScribeCompositor {
             let isTagPrefix = false;
             for (let t = 0; t < ScribeCompositor.TARGET_TAGS.length; t++) {
                 if (('<' + ScribeCompositor.TARGET_TAGS[t]).startsWith(trailing) || `</${ScribeCompositor.TARGET_TAGS[t]}>`.startsWith(trailing)) {
-                    isTagPrefix = true;
-                    break;
+                    isTagPrefix = true; break;
                 }
             }
-            if (!isTagPrefix) {
-                speculativeText += trailing;
-            }
+            if (!isTagPrefix) speculativeText += trailing;
         }
 
-        if (streamContext.mathState === 'inline_dollar') {
-            speculativeText += '$' + streamContext.currentMathBuffer;
-        } else if (streamContext.mathState === 'inline_paren') {
-            speculativeText += '\\(' + streamContext.currentMathBuffer;
-        }
+        if (streamContext.mathState === 'inline_dollar') speculativeText += '$' + streamContext.currentMathBuffer;
+        else if (streamContext.mathState === 'inline_paren') speculativeText += '\\(' + streamContext.currentMathBuffer;
 
         if (speculativeText) {
             const deepCtx = stack[stack.length - 1];
-            if (deepCtx.type === 'code_block' || deepCtx.type === 'artifact') {
-                currentClone.content = speculativeText;
-            } else {
-                currentClone.children.push({ type: 'text', content: speculativeText, attributes: '', isComplete: false, children: [] });
-            }
+            if (deepCtx.type === 'code_block' || deepCtx.type === 'artifact') currentClone.content = speculativeText;
+            else currentClone.children.push({ type: 'text', content: speculativeText, attributes: '', isComplete: false, children: [] });
         }
 
         streamContext.parsedBlocks = clonedRoot.children;
@@ -741,16 +770,13 @@ class ScribeCompositor {
         if (!stream) return;
         const currentText = (this.messageRegistry.get(msgId) || "") + token;
         this.messageRegistry.set(msgId, currentText);
-        this._lexicalStreamParse(stream, currentText);
+        this._lexicalStreamParse(stream, currentText, false);
         if (!stream.isPendingRender) {
             stream.isPendingRender = true;
             const now = performance.now();
             const elapsed = now - stream.lastRenderTime;
-            if (elapsed > 16.67) {
-                this._renderBuffer(msgId);
-            } else {
-                window.requestAnimationFrame(() => this._renderBuffer(msgId));
-            }
+            if (elapsed > 16.67) this._renderBuffer(msgId);
+            else window.requestAnimationFrame(() => this._renderBuffer(msgId));
         }
     }
 
@@ -770,9 +796,8 @@ class ScribeCompositor {
         }, false);
         const textNodes = [];
         let node;
-        while (node = walker.nextNode()) {
-            textNodes.push(node);
-        }
+        while (node = walker.nextNode()) textNodes.push(node);
+        
         for (let n = 0; n < textNodes.length; n++) {
             const textNode = textNodes[n];
             let text = textNode.nodeValue;
@@ -788,11 +813,10 @@ class ScribeCompositor {
                 if (text.startsWith('$$', i)) { matchType = 'block'; startDelimiter = '$$'; endDelimiter = '$$'; }
                 else if (text.startsWith('\\[', i)) { matchType = 'block'; startDelimiter = '\\['; endDelimiter = '\\]'; }
                 else if (text.startsWith('\\(', i)) { matchType = 'inline'; startDelimiter = '\\('; endDelimiter = '\\)'; }
-                else if (text[i] === '$') {
-                    if (i + 1 < len && text[i+1] !== ' ' && !(text[i+1] >= '0' && text[i+1] <= '9')) {
-                        matchType = 'inline'; startDelimiter = '$'; endDelimiter = '$';
-                    }
+                else if (text[i] === '$' && i + 1 < len && text[i+1] !== ' ' && !(text[i+1] >= '0' && text[i+1] <= '9')) {
+                    matchType = 'inline'; startDelimiter = '$'; endDelimiter = '$';
                 }
+                
                 if (matchType) {
                     const startIdx = i;
                     const contentStart = i + startDelimiter.length;
@@ -800,27 +824,20 @@ class ScribeCompositor {
                     if (endIdx !== -1) {
                         const mathContent = text.substring(contentStart, endIdx);
                         if (!fragment) fragment = textNode.ownerDocument.createDocumentFragment();
-                        if (startIdx > 0) {
-                            fragment.appendChild(textNode.ownerDocument.createTextNode(text.substring(0, startIdx)));
-                        }
+                        if (startIdx > 0) fragment.appendChild(textNode.ownerDocument.createTextNode(text.substring(0, startIdx)));
                         const mathSpan = textNode.ownerDocument.createElement('span');
                         mathSpan.className = matchType === 'block' ? 'scribe-math-block' : 'scribe-math-inline';
                         mathSpan.dataset.tex = btoa(encodeURIComponent(mathContent));
                         fragment.appendChild(mathSpan);
                         text = text.substring(endIdx + endDelimiter.length);
-                        i = 0;
-                        continue;
+                        i = 0; continue;
                     }
                 }
                 i++;
             }
             if (fragment) {
-                if (text.length > 0) {
-                    fragment.appendChild(textNode.ownerDocument.createTextNode(text));
-                }
-                if (textNode.parentNode) {
-                    textNode.parentNode.replaceChild(fragment, textNode);
-                }
+                if (text.length > 0) fragment.appendChild(textNode.ownerDocument.createTextNode(text));
+                if (textNode.parentNode) textNode.parentNode.replaceChild(fragment, textNode);
             }
         }
     }
@@ -831,11 +848,7 @@ class ScribeCompositor {
             htmlOut = window.DOMPurify.sanitize(htmlOut, {
                 ADD_TAGS: ['details', 'summary', 'artifact', 'span', 'div', 'think', 'rlm_exec', 'rlm_result', 'status', 'candidate', 'evaluation', 'winner'],
                 ADD_ATTR: ['data-tex', 'data-lang', 'data-filename', 'class', 'target', 'rel', 'data-block-type', 'data-vis-sealed', 'open', 'id', 'data-editor-id', 'data-val'],
-                CUSTOM_ELEMENT_HANDLING: {
-                    tagNameCheck: () => true,
-                    attributeNameCheck: () => true,
-                    allowCustomizedBuiltInElements: true
-                }
+                CUSTOM_ELEMENT_HANDLING: { tagNameCheck: () => true, attributeNameCheck: () => true, allowCustomizedBuiltInElements: true }
             });
         }
         
@@ -851,7 +864,7 @@ class ScribeCompositor {
         const isInsideReasoningBox = targetElement && targetElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
         const currentPromotedPool = [];
         tempNode.querySelectorAll('.dynamic-markdown-code').forEach((wrapper, idx) => {
-            if (!nodeObj.isComplete || isInsideReasoningBox) return;
+            if (!nodeObj || !nodeObj.isComplete || isInsideReasoningBox) return;
             const targetedLang = (wrapper.dataset.lang || 'text').toLowerCase();
             if (!this._isSupportedCodeLanguage(targetedLang)) return;
             const stableEditorId = `${nodeObj.wrapper.id}-nested-markdown-${idx}`;
@@ -896,9 +909,7 @@ class ScribeCompositor {
         if (registry && registry.length > 0) this._injectMathNodes(targetElement, registry);
         if (window.katex) {
             targetElement.querySelectorAll('.scribe-math-inline, .scribe-math-block').forEach(el => {
-                if (el.closest('pre') || el.closest('code') || el.closest('.scribe-native-code-wrapper') || el.closest('.scribe-ace-wrapper')) {
-                    return;
-                }
+                if (el.closest('pre') || el.closest('code') || el.closest('.scribe-native-code-wrapper') || el.closest('.scribe-ace-wrapper')) return;
                 const b64 = el.dataset.tex;
                 if (!b64) return;
                 const isBlock = el.classList.contains('scribe-math-block');
@@ -911,20 +922,14 @@ class ScribeCompositor {
                         const decoded = atob(b64);
                         try { tex = decodeURIComponent(decoded); } catch(e) { tex = decoded; }
                         tex = this._healKaTeX(tex);
-                    } catch (decodeErr) {
-                        return;
-                    }
+                    } catch (decodeErr) { return; }
                     try {
                         const container = document.createElement('span');
                         window.katex.render(tex, container, { displayMode: isBlock, throwOnError: true });
-                        if (this.mathRenderCache.size >= 1000) {
-                            this.mathRenderCache.delete(this.mathRenderCache.keys().next().value);
-                        }
+                        if (this.mathRenderCache.size >= 1000) this.mathRenderCache.delete(this.mathRenderCache.keys().next().value);
                         this.mathRenderCache.set(cacheKey, container.innerHTML);
                         el.innerHTML = container.innerHTML;
-                    } catch (err) {
-                        el.textContent = tex;
-                    }
+                    } catch (err) { el.textContent = tex; }
                 }
             });
         }
@@ -935,9 +940,8 @@ class ScribeCompositor {
         const walker = document.createTreeWalker(targetElement, NodeFilter.SHOW_TEXT, null, false);
         const nodesToProcess = [];
         let node;
-        while (node = walker.nextNode()) {
-            if (node.nodeValue.indexOf('SCRIBEMATH') !== -1) nodesToProcess.push(node);
-        }
+        while (node = walker.nextNode()) if (node.nodeValue.indexOf('SCRIBEMATH') !== -1) nodesToProcess.push(node);
+        
         for (let n = 0; n < nodesToProcess.length; n++) {
             const textNode = nodesToProcess[n];
             const parent = textNode.parentNode;
@@ -948,32 +952,19 @@ class ScribeCompositor {
             const len = text.length;
             while (i < len) {
                 const idx = text.indexOf('SCRIBEMATH', i);
-                if (idx === -1) {
-                    fragment.appendChild(document.createTextNode(text.substring(i)));
-                    break;
-                }
+                if (idx === -1) { fragment.appendChild(document.createTextNode(text.substring(i))); break; }
                 if (idx > i) fragment.appendChild(document.createTextNode(text.substring(i, idx)));
                 let current = idx;
                 let isBlock = false;
                 let validToken = false;
                 let tokenLength = 0;
                 let registryIdx = -1;
-                if (text.startsWith('SCRIBEMATHBLOCKX', current)) {
-                    isBlock = true;
-                    current += 16;
-                } else if (text.startsWith('SCRIBEMATHINLINEX', current)) {
-                    isBlock = false;
-                    current += 17;
-                } else {
-                    fragment.appendChild(document.createTextNode(text.substring(idx, idx + 10)));
-                    i = idx + 10;
-                    continue;
-                }
+                if (text.startsWith('SCRIBEMATHBLOCKX', current)) { isBlock = true; current += 16; }
+                else if (text.startsWith('SCRIBEMATHINLINEX', current)) { isBlock = false; current += 17; }
+                else { fragment.appendChild(document.createTextNode(text.substring(idx, idx + 10))); i = idx + 10; continue; }
+                
                 let numStr = "";
-                while (current < len && text[current] >= '0' && text[current] <= '9') {
-                    numStr += text[current];
-                    current++;
-                }
+                while (current < len && text[current] >= '0' && text[current] <= '9') { numStr += text[current]; current++; }
                 if (current < len && text[current] === 'X' && numStr.length > 0) {
                     registryIdx = parseInt(numStr, 10);
                     tokenLength = (current + 1) - idx;
@@ -988,10 +979,7 @@ class ScribeCompositor {
                         fragment.appendChild(wrapper);
                     }
                     i = idx + tokenLength;
-                } else {
-                    fragment.appendChild(document.createTextNode(text.substring(idx, idx + 1)));
-                    i = idx + 1;
-                }
+                } else { fragment.appendChild(document.createTextNode(text.substring(idx, idx + 1))); i = idx + 1; }
             }
             parent.replaceChild(fragment, textNode);
         }
@@ -1016,43 +1004,21 @@ class ScribeCompositor {
         const skippedWorkerModes = ['text', 'plain', 'abstract', 'none', 'markdown', 'mermaid'];
         const shouldUseWorker = isFinalized && !skippedWorkerModes.includes(activeModeName);
         editor.setOptions({
-            maxLines: 57,
-            minLines: 4,
-            autoScrollEditorIntoView: false,
-            fontSize: "13px",
-            fontFamily: "var(--font-code, ui-monospace, monospace)",
-            showPrintMargin: false,
-            showGutter: true,
-            showLineNumbers: true,
-            fixedWidthGutter: true,
-            useWorker: shouldUseWorker,
-            showFoldWidgets: true,
-            wrap: false,
-            hScrollBarAlwaysVisible: false,
-            highlightActiveLine: true,
-            displayIndentGuides: true,
-            highlightGutterLine: true,
-            scrollPastEnd: 0.1,
-            readOnly: false,
-            enableBasicAutocompletion: true,
-            enableLiveAutocompletion: true,
-            enableSnippets: true,
-            navigateWithinSoftTabs: true,
-            animatedScroll: true,
-            fadeFoldWidgets: true
+            maxLines: 57, minLines: 3, autoScrollEditorIntoView: false, fontSize: "13px",
+            fontFamily: "var(--font-code, ui-monospace, monospace)", showPrintMargin: false,
+            showGutter: true, showLineNumbers: true, fixedWidthGutter: true, useWorker: shouldUseWorker,
+            showFoldWidgets: true, wrap: false, hScrollBarAlwaysVisible: false, highlightActiveLine: true,
+            displayIndentGuides: true, highlightGutterLine: true, scrollPastEnd: 0.1, readOnly: false,
+            enableBasicAutocompletion: true, enableLiveAutocompletion: true, enableSnippets: true,
+            navigateWithinSoftTabs: true, animatedScroll: true, fadeFoldWidgets: true
         });
         editor.session.setTabSize(4);
         editor.session.setUseSoftTabs(true);
         editor.session.setUseWorker(shouldUseWorker);
         
-        if (editor.getValue() !== (content || '')) {
-            editor.setValue(content || '', 1);
-        }
+        if (editor.getValue() !== (content || '')) editor.setValue(content || '', 1);
         editor.clearSelection();
-        window.requestAnimationFrame(() => {
-            editor.resize();
-            editor.renderer.updateFull();
-        });
+        window.requestAnimationFrame(() => { editor.resize(); editor.renderer.updateFull(); });
         if (wrapper && !this.observedNodes.has(editorId)) {
             this.editorObserver.observe(wrapper);
             this.observedNodes.set(editorId, wrapper);
@@ -1082,9 +1048,7 @@ class ScribeCompositor {
                 const b64 = visualContext[v];
                 if (typeof b64 === 'string' && (b64.startsWith('data:image/') || b64.startsWith('blob:'))) {
                     const img = document.createElement('img');
-                    img.src = b64;
-                    img.className = 'context-thumbnail';
-                    img.loading = 'lazy';
+                    img.src = b64; img.className = 'context-thumbnail'; img.loading = 'lazy';
                     fragment.appendChild(img);
                 }
             }
@@ -1100,26 +1064,15 @@ class ScribeCompositor {
         
         if (role === 'assistant') {
             this.activeStreams.set(msgId, {
-                container: content,
-                isPendingRender: false,
-                isFinalized: false,
-                lastRenderTime: 0,
-                blockNodes: [],
-                cursorIndex: 0,
-                mathState: 'none',
-                currentMathBuffer: '',
-                braceDepth: 0,
-                inInlineCode: false,
-                activeInlineLength: 0,
-                activeEnvName: '',
-                textBuffer: '',
-                mathRegistry: [],
-                parsedBlocks: []
+                container: content, role: 'assistant', isPendingRender: false, isFinalized: false,
+                lastRenderTime: 0, blockNodes: [], cursorIndex: 0, mathState: 'none', currentMathBuffer: '',
+                braceDepth: 0, inInlineCode: false, activeInlineLength: 0, activeEnvName: '', textBuffer: '',
+                mathRegistry: [], parsedBlocks: []
             });
             if (initialText) this.streamToken(msgId, initialText);
         } else {
-            let staticCtx = { cursorIndex: 0, mathState: 'none', currentMathBuffer: '', braceDepth: 0, inInlineCode: false, activeInlineLength: 0, textBuffer: '', mathRegistry: [], parsedBlocks: [] };
-            this._lexicalStreamParse(staticCtx, initialText);
+            let staticCtx = { role: 'user', cursorIndex: 0, mathState: 'none', currentMathBuffer: '', braceDepth: 0, inInlineCode: false, activeInlineLength: 0, textBuffer: '', mathRegistry: [], parsedBlocks: [] };
+            this._lexicalStreamParse(staticCtx, initialText, true);
             this._renderBlockTree(content, staticCtx.parsedBlocks, msgId, 'static', staticCtx.mathRegistry, { cache: [] });
         }
         this._scrollToBottom(true);
@@ -1134,177 +1087,80 @@ class ScribeCompositor {
         let target = wrapper;
         wrapper.dataset.blockType = block.type;
         
-        if (block.type === 'text') {
-            wrapper.className = 'scribe-text-block';
-        } else if (block.type === 'math_block') {
-            wrapper.className = 'scribe-math-block';
-            target = wrapper;
-        } else if (block.type === 'code_block') {
+        if (block.type === 'text') wrapper.className = 'scribe-text-block';
+        else if (block.type === 'math_block') { wrapper.className = 'scribe-math-block'; target = wrapper; }
+        else if (block.type === 'code_block') {
             const lang = (block.attributes || '').toLowerCase();
             const isSettled = block.isLanguageSettled !== false;
             const lineCount = (block.content || '').split('\n').length;
-            
             const isMathLang = ['math', 'latex', 'katex'].includes(lang);
             const isInsideReasoningBox = containerElement && containerElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
+            
             if (isMathLang) {
-                wrapper.className = 'scribe-math-block-container';
-                wrapper.dataset.aceInjected = "false";
-                wrapper.dataset.lang = lang || "latex";
-                wrapper.dataset.isMathPrediction = "true";
-                
-                const innerMath = document.createElement('div');
-                innerMath.className = 'scribe-math-block';
-                wrapper.appendChild(wrapper.ownerDocument.createElement('div'));
-                wrapper.innerHTML = '';
-                wrapper.appendChild(innerMath);
-                target = innerMath;
+                wrapper.className = 'scribe-math-block-container'; wrapper.dataset.aceInjected = "false";
+                wrapper.dataset.lang = lang || "latex"; wrapper.dataset.isMathPrediction = "true";
+                const innerMath = document.createElement('div'); innerMath.className = 'scribe-math-block';
+                wrapper.innerHTML = ''; wrapper.appendChild(innerMath); target = innerMath;
             } else if (['markdown', 'md'].includes(lang)) {
                 wrapper.className = 'scribe-markdown-preview-block markdown-body';
-                wrapper.dataset.aceInjected = "false";
-                wrapper.dataset.lang = lang;
-                target = wrapper;
+                wrapper.dataset.aceInjected = "false"; wrapper.dataset.lang = lang; target = wrapper;
             } else if (isInsideReasoningBox || !isSettled || !this._isSupportedCodeLanguage(lang) || (lineCount < 3 && !block.isComplete)) {
-                wrapper.className = 'scribe-native-code-wrapper';
-                wrapper.dataset.aceInjected = "false";
-                wrapper.dataset.lang = lang;
-                const microBar = document.createElement('div');
-                microBar.className = 'ace-action-bar micro-action-bar';
-                
-                const langLabel = document.createElement('span');
-                langLabel.className = 'ace-lang-label';
+                wrapper.className = 'scribe-native-code-wrapper'; wrapper.dataset.aceInjected = "false"; wrapper.dataset.lang = lang;
+                const microBar = document.createElement('div'); microBar.className = 'ace-action-bar micro-action-bar';
+                const langLabel = document.createElement('span'); langLabel.className = 'ace-lang-label';
                 langLabel.textContent = (block.attributes || 'CODE').toUpperCase();
-                const copyBtn = document.createElement('button');
-                copyBtn.className = 'action-btn ace-copy-btn';
-                copyBtn.innerHTML = 'Copy';
-                
-                microBar.appendChild(langLabel);
-                microBar.appendChild(copyBtn);
-                
-                const codeBody = document.createElement('div');
-                codeBody.className = 'scribe-text-block scribe-code-native';
+                const copyBtn = document.createElement('button'); copyBtn.className = 'action-btn ace-copy-btn'; copyBtn.innerHTML = 'Copy';
+                microBar.appendChild(langLabel); microBar.appendChild(copyBtn);
+                const codeBody = document.createElement('div'); codeBody.className = 'scribe-text-block scribe-code-native';
                 codeBody.innerHTML = `<pre style="margin:0; font-family:var(--font-code, monospace); white-space:pre-wrap;"><code class="streaming-code-payload"></code></pre>`;
-                
-                wrapper.appendChild(microBar);
-                wrapper.appendChild(codeBody);
-                target = codeBody.querySelector('.streaming-code-payload');
+                wrapper.appendChild(microBar); wrapper.appendChild(codeBody); target = codeBody.querySelector('.streaming-code-payload');
                 copyBtn.onclick = () => {
                     const dynamicPayload = wrapper.querySelector('code.streaming-code-payload')?.textContent || '';
                     this._copyTextWithFeedback(dynamicPayload, copyBtn, 'Copy', 'Copied!');
                 };
             } else {
-                wrapper.className = 'scribe-ace-wrapper';
-                wrapper.dataset.aceInjected = "true";
-                wrapper.dataset.editorId = prefixId;
-                const actionBar = document.createElement('div');
-                actionBar.className = 'ace-action-bar';
-                
-                const langLabel = document.createElement('span');
-                langLabel.className = 'ace-lang-label';
+                wrapper.className = 'scribe-ace-wrapper'; wrapper.dataset.aceInjected = "true"; wrapper.dataset.editorId = prefixId;
+                const actionBar = document.createElement('div'); actionBar.className = 'ace-action-bar';
+                const langLabel = document.createElement('span'); langLabel.className = 'ace-lang-label';
                 langLabel.textContent = block.attributes.toUpperCase() || "CODE";
-                const copyBtn = document.createElement('button');
-                copyBtn.className = 'action-btn ace-copy-btn';
-                copyBtn.innerHTML = 'Copy Code';
-                
-                actionBar.appendChild(langLabel);
-                actionBar.appendChild(copyBtn);
-                
-                const editorDiv = document.createElement('div');
-                editorDiv.id = prefixId;
-                editorDiv.className = 'scribe-ace-editor';
-                
-                wrapper.appendChild(actionBar);
-                wrapper.appendChild(editorDiv);
-                target = editorDiv;
-                copyBtn.onclick = () => {
-                    if (this.editorPool.has(prefixId)) {
-                        this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!');
-                    }
-                };
+                const copyBtn = document.createElement('button'); copyBtn.className = 'action-btn ace-copy-btn'; copyBtn.innerHTML = 'Copy Code';
+                actionBar.appendChild(langLabel); actionBar.appendChild(copyBtn);
+                const editorDiv = document.createElement('div'); editorDiv.id = prefixId; editorDiv.className = 'scribe-ace-editor';
+                wrapper.appendChild(actionBar); wrapper.appendChild(editorDiv); target = editorDiv;
+                copyBtn.onclick = () => { if (this.editorPool.has(prefixId)) this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!'); };
             }
         } else if (block.type === 'artifact') {
             const attrs = this._parseAttributes(block.attributes);
             const lang = attrs['language'] || attrs['lang'] || 'text';
             const name = attrs['identifier'] || attrs['name'] || lang.toUpperCase();
-            
             if (['markdown', 'md'].includes(lang)) {
-                wrapper.className = 'scribe-markdown-preview-block markdown-body';
-                wrapper.dataset.aceInjected = "false";
-                wrapper.dataset.lang = lang;
-                target = wrapper;
+                wrapper.className = 'scribe-markdown-preview-block markdown-body'; wrapper.dataset.aceInjected = "false"; wrapper.dataset.lang = lang; target = wrapper;
             } else if (!this._isSupportedCodeLanguage(lang)) {
-                wrapper.className = 'scribe-text-block scribe-artifact-native';
-                wrapper.dataset.lang = lang;
-                target = wrapper;
+                wrapper.className = 'scribe-text-block scribe-artifact-native'; wrapper.dataset.lang = lang; target = wrapper;
             } else {
-                wrapper.className = 'scribe-ace-wrapper';
-                wrapper.dataset.aceInjected = "true";
-                wrapper.dataset.editorId = prefixId;
-                const actionBar = document.createElement('div');
-                actionBar.className = 'ace-action-bar';
-                
-                const langLabel = document.createElement('span');
-                langLabel.className = 'ace-lang-label';
+                wrapper.className = 'scribe-ace-wrapper'; wrapper.dataset.aceInjected = "true"; wrapper.dataset.editorId = prefixId;
+                const actionBar = document.createElement('div'); actionBar.className = 'ace-action-bar';
+                const langLabel = document.createElement('span'); langLabel.className = 'ace-lang-label';
                 langLabel.textContent = name;
-                const copyBtn = document.createElement('button');
-                copyBtn.className = 'action-btn ace-copy-btn';
-                copyBtn.innerHTML = 'Copy Code';
-                
-                actionBar.appendChild(langLabel);
-                actionBar.appendChild(copyBtn);
-                
-                const editorDiv = document.createElement('div');
-                editorDiv.id = prefixId;
-                editorDiv.className = 'scribe-ace-editor';
-                
-                wrapper.appendChild(actionBar);
-                wrapper.appendChild(editorDiv);
-                target = editorDiv;
-                copyBtn.onclick = () => {
-                    if (this.editorPool.has(prefixId)) {
-                        this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!');
-                    }
-                };
+                const copyBtn = document.createElement('button'); copyBtn.className = 'action-btn ace-copy-btn'; copyBtn.innerHTML = 'Copy Code';
+                actionBar.appendChild(langLabel); actionBar.appendChild(copyBtn);
+                const editorDiv = document.createElement('div'); editorDiv.id = prefixId; editorDiv.className = 'scribe-ace-editor';
+                wrapper.appendChild(actionBar); wrapper.appendChild(editorDiv); target = editorDiv;
+                copyBtn.onclick = () => { if (this.editorPool.has(prefixId)) this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!'); };
             }
         } else if (['think', 'rlm_exec', 'rlm_result', 'candidate', 'evaluation'].includes(block.type)) {
             wrapper.open = true;
             const summary = document.createElement('summary');
             const contentDiv = document.createElement('div');
             contentDiv.className = 'thought-content';
-            
-            if (block.type === 'think') {
-                wrapper.className = 'scribe-thought-block';
-                wrapper.setAttribute('data-block-type', 'think');
-                summary.className = 'thought-header';
-                summary.textContent = 'Latent Reasoning Matrix';
-            } else if (block.type === 'rlm_exec') {
-                wrapper.className = 'scribe-thought-block rlm-exec-block';
-                summary.className = 'thought-header rlm-header';
-                summary.textContent = 'VFS Execution Sandbox';
-            } else if (block.type === 'rlm_result') {
-                wrapper.className = 'scribe-thought-block rlm-result-block';
-                summary.className = 'thought-header rlm-result-header';
-                summary.textContent = 'VFS Telemetry Return';
-            } else if (block.type === 'candidate') {
-                wrapper.className = 'scribe-candidate-block';
-                summary.className = 'candidate-header';
-                const attrs = this._parseAttributes(block.attributes);
-                summary.textContent = `Trajectory Vector ${attrs['index'] || '?'}`;
-            } else if (block.type === 'evaluation') {
-                wrapper.className = 'scribe-evaluation';
-                summary.className = 'thought-header';
-                summary.textContent = 'Critic Protocol';
-            }
-            wrapper.appendChild(summary);
-            wrapper.appendChild(contentDiv);
-            target = contentDiv;
-        } else if (block.type === 'status') {
-            wrapper.className = 'scribe-status-badge resolved';
-            wrapper.textContent = ' ' + block.content;
-            target = wrapper;
-        } else if (block.type === 'winner') {
-            wrapper.className = 'scribe-winner';
-            target = wrapper;
-        }
+            if (block.type === 'think') { wrapper.className = 'scribe-thought-block'; wrapper.setAttribute('data-block-type', 'think'); summary.className = 'thought-header'; summary.textContent = 'Latent Reasoning Matrix'; }
+            else if (block.type === 'rlm_exec') { wrapper.className = 'scribe-thought-block rlm-exec-block'; summary.className = 'thought-header rlm-header'; summary.textContent = 'VFS Execution Sandbox'; }
+            else if (block.type === 'rlm_result') { wrapper.className = 'scribe-thought-block rlm-result-block'; summary.className = 'thought-header rlm-result-header'; summary.textContent = 'VFS Telemetry Return'; }
+            else if (block.type === 'candidate') { wrapper.className = 'scribe-candidate-block'; summary.className = 'candidate-header'; const attrs = this._parseAttributes(block.attributes); summary.textContent = `Trajectory Vector ${attrs['index'] || '?'}`; }
+            else if (block.type === 'evaluation') { wrapper.className = 'scribe-evaluation'; summary.className = 'thought-header'; summary.textContent = 'Critic Protocol'; }
+            wrapper.appendChild(summary); wrapper.appendChild(contentDiv); target = contentDiv;
+        } else if (block.type === 'status') { wrapper.className = 'scribe-status-badge resolved'; wrapper.textContent = ' ' + block.content; target = wrapper; }
+        else if (block.type === 'winner') { wrapper.className = 'scribe-winner'; target = wrapper; }
         return { wrapper, target };
     }
 
@@ -1317,12 +1173,8 @@ class ScribeCompositor {
                     const editorId = deadNode.wrapper.dataset.editorId;
                     if (editorId && this.editorPool.has(editorId)) {
                         try {
-                            if (this.observedNodes.has(editorId)) {
-                                this.editorObserver.unobserve(this.observedNodes.get(editorId));
-                                this.observedNodes.delete(editorId);
-                            }
-                            this.editorPool.get(editorId).destroy();
-                            this.editorPool.delete(editorId);
+                            if (this.observedNodes.has(editorId)) { this.editorObserver.unobserve(this.observedNodes.get(editorId)); this.observedNodes.delete(editorId); }
+                            this.editorPool.get(editorId).destroy(); this.editorPool.delete(editorId);
                         } catch (e) {}
                     }
                 }
@@ -1335,46 +1187,32 @@ class ScribeCompositor {
             let nodeObj = nodeCache.cache[i];
             let typeMismatch = nodeObj && nodeObj.wrapper && nodeObj.wrapper.dataset.blockType !== block.type;
             if (!typeMismatch && nodeObj && nodeObj.wrapper && ['code_block', 'artifact'].includes(block.type)) {
-                const lang = block.type === 'code_block'
-                    ? (block.attributes || '').toLowerCase()
-                    : (this._parseAttributes(block.attributes)['language'] || 'text').toLowerCase();
+                const lang = block.type === 'code_block' ? (block.attributes || '').toLowerCase() : (this._parseAttributes(block.attributes)['language'] || 'text').toLowerCase();
                 const isSettled = block.type === 'code_block' ? (block.isLanguageSettled !== false) : true;
                 const lineCount = (block.content || '').split('\n').length;
-                
                 const isMathLang = ['math', 'latex', 'katex'].includes(lang);
                 const isInsideReasoningBox = containerElement && containerElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
                 const shouldBeAce = !isInsideReasoningBox && !isMathLang && isSettled && this._isSupportedCodeLanguage(lang) && (block.isComplete || lineCount >= 3);
                 const isCurrentlyAce = nodeObj.wrapper.dataset.aceInjected === "true";
-                if (shouldBeAce !== isCurrentlyAce || (['markdown', 'md'].includes(lang) && !nodeObj.wrapper.classList.contains('scribe-markdown-preview-block'))) {
-                    typeMismatch = true;
-                }
+                if (shouldBeAce !== isCurrentlyAce || (['markdown', 'md'].includes(lang) && !nodeObj.wrapper.classList.contains('scribe-markdown-preview-block'))) typeMismatch = true;
             }
             if (nodeObj && nodeObj.wrapper && typeMismatch) {
                 nodeObj.wrapper.remove();
                 const editorId = nodeObj.wrapper.dataset.editorId;
                 if (editorId && this.editorPool.has(editorId)) {
                     try {
-                        if (this.observedNodes.has(editorId)) {
-                            this.editorObserver.unobserve(this.observedNodes.get(editorId));
-                            this.observedNodes.delete(editorId);
-                        }
-                        this.editorPool.get(editorId).destroy();
-                        this.editorPool.delete(editorId);
+                        if (this.observedNodes.has(editorId)) { this.editorObserver.unobserve(this.observedNodes.get(editorId)); this.observedNodes.delete(editorId); }
+                        this.editorPool.get(editorId).destroy(); this.editorPool.delete(editorId);
                     } catch (e) {}
                 }
                 nodeObj = null;
             }
             if (!nodeObj) {
                 nodeObj = this._createBlockElement(block, msgId, currentBlockId, containerElement);
-                nodeObj.lastContentTrace = "";
-                nodeObj.lastRenderedCompletionState = null;
-                nodeObj.childrenCache = { cache: [] };
+                nodeObj.lastContentTrace = ""; nodeObj.lastRenderedCompletionState = null; nodeObj.childrenCache = { cache: [] };
                 let nextNodeObj = nodeCache.cache.slice(i + 1).find(n => n && n.wrapper && n.wrapper.parentNode === containerElement);
-                if (nextNodeObj) {
-                    containerElement.insertBefore(nodeObj.wrapper, nextNodeObj.wrapper);
-                } else {
-                    containerElement.appendChild(nodeObj.wrapper);
-                }
+                if (nextNodeObj) containerElement.insertBefore(nodeObj.wrapper, nextNodeObj.wrapper);
+                else containerElement.appendChild(nodeObj.wrapper);
                 nodeCache.cache[i] = nodeObj;
                 if (['artifact', 'code_block'].includes(block.type) && nodeObj.wrapper.dataset.aceInjected === "true") {
                     const editorDiv = nodeObj.wrapper.querySelector('.scribe-ace-editor');
@@ -1384,47 +1222,31 @@ class ScribeCompositor {
                     }
                 }
             }
-            const needsRender = nodeObj.lastContentTrace !== block.content ||
-                                nodeObj.lastRenderedCompletionState !== block.isComplete ||
-                                block.type === 'math_block';
+            const needsRender = nodeObj.lastContentTrace !== block.content || nodeObj.lastRenderedCompletionState !== block.isComplete || block.type === 'math_block';
             if (needsRender) {
-                nodeObj.lastContentTrace = block.content;
-                nodeObj.lastRenderedCompletionState = block.isComplete;
-                if (block.type === 'text') {
-                    this._renderMarkdownAndMath(nodeObj.target, block.content, registry, nodeObj);
-                } else if (nodeObj.wrapper.classList.contains('scribe-markdown-preview-block')) {
-                    this._renderMarkdownAndMath(nodeObj.target, block.content, registry, nodeObj);
-                } else if (block.type === 'math_block' || (block.type === 'code_block' && (['math', 'latex', 'katex'].includes(nodeObj.wrapper.dataset.lang) || nodeObj.wrapper.dataset.isMathPrediction === "true"))) {
+                nodeObj.lastContentTrace = block.content; nodeObj.lastRenderedCompletionState = block.isComplete;
+                if (block.type === 'text') this._renderMarkdownAndMath(nodeObj.target, block.content, registry, nodeObj);
+                else if (nodeObj.wrapper.classList.contains('scribe-markdown-preview-block')) this._renderMarkdownAndMath(nodeObj.target, block.content, registry, nodeObj);
+                else if (block.type === 'math_block' || (block.type === 'code_block' && (['math', 'latex', 'katex'].includes(nodeObj.wrapper.dataset.lang) || nodeObj.wrapper.dataset.isMathPrediction === "true"))) {
                     const cacheKey = `${btoa(encodeURIComponent(block.content))}-block`;
-                    if (this.mathRenderCache.has(cacheKey)) {
-                        nodeObj.target.innerHTML = this.mathRenderCache.get(cacheKey);
-                    } else {
+                    if (this.mathRenderCache.has(cacheKey)) nodeObj.target.innerHTML = this.mathRenderCache.get(cacheKey);
+                    else {
                         const cleanTex = this._healKaTeX(block.content);
                         try {
-                            const spanNode = document.createElement('span');
-                            window.katex.render(cleanTex, spanNode, { displayMode: true, throwOnError: true });
-                            this.mathRenderCache.set(cacheKey, spanNode.innerHTML);
-                            nodeObj.target.innerHTML = spanNode.innerHTML;
+                            const spanNode = document.createElement('span'); window.katex.render(cleanTex, spanNode, { displayMode: true, throwOnError: true });
+                            this.mathRenderCache.set(cacheKey, spanNode.innerHTML); nodeObj.target.innerHTML = spanNode.innerHTML;
                             nodeObj.target.classList.remove('scribe-math-raw');
-                        } catch (err) {
-                            nodeObj.target.textContent = cleanTex;
-                            nodeObj.target.classList.add('scribe-math-raw');
-                        }
+                        } catch (err) { nodeObj.target.textContent = cleanTex; nodeObj.target.classList.add('scribe-math-raw'); }
                     }
-                } else if (block.type === 'winner') {
-                    nodeObj.target.innerHTML = `<strong>Optimal Vector Selected:</strong> ${window.DOMPurify.sanitize(this._escapeHtml(block.content))}`;
-                } else if (['artifact', 'code_block'].includes(block.type)) {
+                } else if (block.type === 'winner') nodeObj.target.innerHTML = `<strong>Optimal Vector Selected:</strong> ${window.DOMPurify.sanitize(this._escapeHtml(block.content))}`;
+                else if (['artifact', 'code_block'].includes(block.type)) {
                     if (nodeObj.wrapper.classList.contains('scribe-artifact-native') || nodeObj.wrapper.classList.contains('scribe-code-native') || nodeObj.wrapper.classList.contains('scribe-native-code-wrapper')) {
                         const lang = nodeObj.wrapper.dataset.lang;
-                        if (lang === 'mermaid') {
-                            this._renderMarkdownAndMath(nodeObj.target, `\`\`\`mermaid\n${block.content.trim()}\n\`\`\``, []);
-                        } else {
+                        if (lang === 'mermaid') this._renderMarkdownAndMath(nodeObj.target, `\`\`\`mermaid\n${block.content.trim()}\n\`\`\``, [], nodeObj);
+                        else {
                             const codeContainer = nodeObj.wrapper.querySelector('code.streaming-code-payload') || nodeObj.target.querySelector('code.streaming-code-payload');
-                            if (codeContainer) {
-                                codeContainer.textContent = block.content;
-                            } else {
-                                nodeObj.target.textContent = block.content;
-                            }
+                            if (codeContainer) codeContainer.textContent = block.content;
+                            else nodeObj.target.textContent = block.content;
                         }
                     } else if (window.ace && this.editorPool.has(currentBlockId)) {
                         const editor = this.editorPool.get(currentBlockId);
@@ -1435,61 +1257,35 @@ class ScribeCompositor {
                             editor.session.setMode(aceModePath);
                             const langLabel = nodeObj.wrapper.querySelector('.ace-lang-label');
                             if (langLabel) {
-                                if (block.type === 'code_block') {
-                                    langLabel.textContent = block.attributes.toUpperCase() || "CODE";
-                               } else {
-                                    const attrs = this._parseAttributes(block.attributes);
-                                    langLabel.textContent = attrs['name'] || attrs['identifier'] || (attrs['language'] || 'text').toUpperCase();
-                                }
+                                if (block.type === 'code_block') langLabel.textContent = block.attributes.toUpperCase() || "CODE";
+                                else { const attrs = this._parseAttributes(block.attributes); langLabel.textContent = attrs['name'] || attrs['identifier'] || (attrs['language'] || 'text').toUpperCase(); }
                             }
                         }
-                        
                         const currentVal = editor.getValue();
                         if (currentVal !== block.content) {
                             if (block.content.startsWith(currentVal)) {
                                 const appendPart = block.content.substring(currentVal.length);
-                                const row = editor.session.getLength() - 1;
-                                const column = editor.session.getLine(row).length;
+                                const row = editor.session.getLength() - 1; const column = editor.session.getLine(row).length;
                                 editor.session.insert({ row, column }, appendPart);
-                            } else {
-                                const scrollPos = editor.session.getScrollTop();
-                                editor.setValue(block.content, 1);
-                                editor.session.setScrollTop(scrollPos);
-                            }
+                            } else { const scrollPos = editor.session.getScrollTop(); editor.setValue(block.content, 1); editor.session.setScrollTop(scrollPos); }
                             editor.clearSelection();
-                            if (!block.isComplete) {
-                                const totalRows = editor.session.getLength();
-                                editor.renderer.scrollToRow(totalRows);
-                            }
+                            if (!block.isComplete) { const totalRows = editor.session.getLength(); editor.renderer.scrollToRow(totalRows); }
                         }
                         if (block.isComplete && !editor.session.getUseWorker()) {
                             const activeModeName = aceModePath.split('/').pop();
                             const skippedWorkerModes = ['text', 'plain', 'abstract', 'none', 'markdown', 'mermaid'];
                             if (!skippedWorkerModes.includes(activeModeName)) {
-                                editor.setOptions({ useWorker: true, highlightActiveLine: true });
-                                editor.session.setUseWorker(true);
-                                window.requestAnimationFrame(() => {
-                                    editor.resize();
-                                    editor.renderer.updateFull();
-                                });
+                                editor.setOptions({ useWorker: true, highlightActiveLine: true }); editor.session.setUseWorker(true);
+                                window.requestAnimationFrame(() => { editor.resize(); editor.renderer.updateFull(); });
                             }
                         }
                     }
                 }
             }
-            if (block.children && block.children.length > 0) {
-                this._renderBlockTree(nodeObj.target, block.children, msgId, `${prefixId}-${i}`, registry, nodeObj.childrenCache);
-            }
+            if (block.children && block.children.length > 0) this._renderBlockTree(nodeObj.target, block.children, msgId, `${prefixId}-${i}`, registry, nodeObj.childrenCache);
             if (nodeObj.wrapper.tagName === 'DETAILS') {
-                if (block.isComplete) {
-                    if (!nodeObj.wrapper.hasAttribute('data-vis-sealed')) {
-                        nodeObj.wrapper.removeAttribute('open');
-                        nodeObj.wrapper.setAttribute('data-vis-sealed', 'true');
-                    }
-                } else {
-                    nodeObj.wrapper.setAttribute('open', 'true');
-                    nodeObj.wrapper.removeAttribute('data-vis-sealed');
-                }
+                if (block.isComplete) { if (!nodeObj.wrapper.hasAttribute('data-vis-sealed')) { nodeObj.wrapper.setAttribute('data-vis-sealed', 'true'); } }
+                else { nodeObj.wrapper.setAttribute('open', 'true'); nodeObj.wrapper.removeAttribute('data-vis-sealed'); }
             }
         }
     }
@@ -1499,7 +1295,6 @@ class ScribeCompositor {
         if (!stream || stream.isFinalized) return;
         stream.lastRenderTime = performance.now();
         const isAtBottom = this._isScrolledToBottom();
-        
         this._renderBlockTree(stream.container, stream.parsedBlocks, msgId, 'stream', stream.mathRegistry, { cache: stream.blockNodes });
         if (isAtBottom || this._forceStickyFollow) this._scrollToBottom(true);
         stream.isPendingRender = false;
@@ -1509,6 +1304,8 @@ class ScribeCompositor {
         const stream = this.activeStreams.get(msgId);
         if (!stream || stream.isFinalized) return;
         stream.lastRenderTime = 0;
+        const currentText = this.messageRegistry.get(msgId) || "";
+        this._lexicalStreamParse(stream, currentText, true);
         this._renderBuffer(msgId);
         stream.isFinalized = true;
         this._forceStickyFollow = false;
@@ -1522,16 +1319,12 @@ class ScribeCompositor {
                         const activeModeName = aceModePath.split('/').pop();
                         const skippedWorkerModes = ['text', 'plain', 'abstract', 'none', 'markdown', 'mermaid'];
                         const shouldUseWorker = !skippedWorkerModes.includes(activeModeName);
-                        
                         editor.setOptions({ useWorker: shouldUseWorker, highlightActiveLine: true });
                         editor.session.setUseWorker(shouldUseWorker);
-                        editor.resize();
-                        editor.renderer.updateFull();
+                        editor.resize(); editor.renderer.updateFull();
                     }
                 }
-                if (nodeObj.childrenCache && nodeObj.childrenCache.cache.length > 0) {
-                    finalizeCacheElements(nodeObj.childrenCache.cache);
-                }
+                if (nodeObj.childrenCache && nodeObj.childrenCache.cache.length > 0) finalizeCacheElements(nodeObj.childrenCache.cache);
             });
         };
         finalizeCacheElements(stream.blockNodes);
@@ -1541,21 +1334,13 @@ class ScribeCompositor {
 
     purgeMessagePool(msgId) {
         const targets = [];
-        this.editorPool.forEach((editor, id) => {
-            if (id.startsWith(msgId)) targets.push(id);
-        });
+        this.editorPool.forEach((editor, id) => { if (id.startsWith(msgId)) targets.push(id); });
         for (let t = 0; t < targets.length; t++) {
             const id = targets[t];
             try {
-                if (this.observedNodes.has(id)) {
-                    this.editorObserver.unobserve(this.observedNodes.get(id));
-                    this.observedNodes.delete(id);
-                }
+                if (this.observedNodes.has(id)) { this.editorObserver.unobserve(this.observedNodes.get(id)); this.observedNodes.delete(id); }
                 const editor = this.editorPool.get(id);
-                if (editor) {
-                    editor.destroy();
-                    if (editor.container) editor.container.remove();
-                }
+                if (editor) { editor.destroy(); if (editor.container) editor.container.remove(); }
             } catch (e) {}
             this.editorPool.delete(id);
         }
@@ -1576,16 +1361,9 @@ class ScribeCompositor {
                 sentinel.id = 'scribe-scroll-sentinel';
                 this.historyNode.appendChild(sentinel);
             }
-            
             const orchestratorHeight = this.compositorNode ? this.compositorNode.offsetHeight : 180;
-            sentinel.style.height = `${orchestratorHeight + 40}px`;
-            sentinel.style.width = '100%';
-            sentinel.style.pointerEvents = 'none';
-            
-            if (this.historyNode.lastChild !== sentinel) {
-                this.historyNode.appendChild(sentinel);
-            }
-            
+            sentinel.style.height = `${orchestratorHeight + 40}px`; sentinel.style.width = '100%'; sentinel.style.pointerEvents = 'none';
+            if (this.historyNode.lastChild !== sentinel) this.historyNode.appendChild(sentinel);
             this.historyNode.scrollTop = this.historyNode.scrollHeight;
         }
     }

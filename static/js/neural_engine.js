@@ -753,7 +753,34 @@ class NeuralEngine {
         let latestArtifact = "NONE";
         
         const prunedHistory = historyArray.map(msg => {
-            let content = typeof msg.content === 'string' ? msg.content : '[Multimodal Payload]';
+            let rawContent = msg.content;
+            if (msg.msgId && window.Compositor && window.Compositor.messageRegistry && window.Compositor.messageRegistry.has(msg.msgId)) {
+                const registryText = window.Compositor.messageRegistry.get(msg.msgId);
+                if (typeof msg.content === 'string') {
+                    rawContent = registryText;
+                } else if (Array.isArray(msg.content)) {
+                    rawContent = msg.content.map(item => {
+                        if (item.type === 'text') {
+                            return registryText || item.text || '';
+                        }
+                        return item.text || '';
+                    }).join(' ').trim();
+                }
+            }
+            
+            let content = "";
+            if (typeof rawContent === 'string') {
+                content = rawContent;
+            } else if (Array.isArray(rawContent)) {
+                content = rawContent.map(item => {
+                    if (item.type === 'text') return item.text || '';
+                    if (item.type === 'image_url') return '[Image Payload]';
+                    return '';
+                }).join(' ').trim();
+            } else {
+                content = '[Multimodal Payload]';
+            }
+            
             if (msg.role === 'assistant') {
                 const extractedArtifact = LexicalAutomaton.extractArtifact(content);
                 if (extractedArtifact) {
