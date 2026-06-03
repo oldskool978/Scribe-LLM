@@ -1284,8 +1284,15 @@ class ScribeCompositor {
             }
             if (block.children && block.children.length > 0) this._renderBlockTree(nodeObj.target, block.children, msgId, `${prefixId}-${i}`, registry, nodeObj.childrenCache);
             if (nodeObj.wrapper.tagName === 'DETAILS') {
-                if (block.isComplete) { if (!nodeObj.wrapper.hasAttribute('data-vis-sealed')) { nodeObj.wrapper.setAttribute('data-vis-sealed', 'true'); } }
-                else { nodeObj.wrapper.setAttribute('open', 'true'); nodeObj.wrapper.removeAttribute('data-vis-sealed'); }
+                if (block.isComplete) {
+                    if (!nodeObj.wrapper.hasAttribute('data-vis-sealed')) {
+                        nodeObj.wrapper.setAttribute('data-vis-sealed', 'true');
+                        nodeObj.wrapper.removeAttribute('open');
+                    }
+                } else {
+                    nodeObj.wrapper.setAttribute('open', 'true');
+                    nodeObj.wrapper.removeAttribute('data-vis-sealed');
+                }
             }
         }
     }
