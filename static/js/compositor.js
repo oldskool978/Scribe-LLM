@@ -1051,9 +1051,9 @@ class ScribeCompositor {
         const shouldUseWorker = isFinalized && !skippedWorkerModes.includes(activeModeName);
 
         editor.setOptions({
-            maxLines: 60,
+            maxLines: 57,
             minLines: 4,
-            autoScrollEditorIntoView: true,
+            autoScrollEditorIntoView: false,
             fontSize: "13px",
             fontFamily: "var(--font-code, ui-monospace, monospace)",
             showPrintMargin: false,
@@ -1062,8 +1062,9 @@ class ScribeCompositor {
             fixedWidthGutter: true,         
             useWorker: shouldUseWorker, 
             showFoldWidgets: true,
-            wrap: true,
-            indentedSoftWrap: true,
+            wrap: false,
+            hScrollBarAlwaysVisible: false,
+            //indentedSoftWrap: true,
             highlightActiveLine: true,
             displayIndentGuides: true,
             highlightGutterLine: true,
@@ -1541,6 +1542,11 @@ class ScribeCompositor {
                                 editor.session.setScrollTop(scrollPos);
                             }
                             editor.clearSelection();
+
+                            if (!block.isComplete) {
+                                const totalRows = editor.session.getLength();
+                                editor.renderer.scrollToRow(totalRows);
+                            }
                         }
 
                         if (block.isComplete && !editor.session.getUseWorker()) {
