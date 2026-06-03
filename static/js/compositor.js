@@ -1,6 +1,19 @@
-// Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md.
-
 class ScribeCompositor {
+    static BARRED_FROM_ACE = new Set(['mermaid', 'markdown', 'md', 'text', 'txt', 'prose', 'math', 'latex', 'katex', 'plain_text', 'plain']);
+    static AI_QUIRKS = {
+        'python3': 'python', 'py3': 'python', 'html5': 'html',
+        'postgres': 'pgsql', 'postgresql': 'pgsql',
+        'kubernetes': 'yaml', 'k8s': 'yaml',
+        'make': 'makefile',
+        'react': 'jsx', 'reactjs': 'jsx', 'vue3': 'vue', 'vue2': 'vue',
+        'bash': 'sh', 'shell': 'sh', 'zsh': 'sh', 'c++': 'c_cpp', 'cpp': 'c_cpp', 'c': 'c_cpp',
+        'c#': 'csharp', 'cs': 'csharp', 'f#': 'fsharp', 'fs': 'fsharp',
+        'go': 'golang', 'rs': 'rust', 'rb': 'ruby', 'py': 'python',
+        'js': 'javascript', 'ts': 'typescript', 'yml': 'yaml',
+        'docker': 'dockerfile', 'node': 'javascript', 'md': 'markdown'
+    };
+    static TARGET_TAGS = ['think', 'rlm_exec', 'rlm_result', 'status', 'candidate', 'evaluation', 'winner', 'artifact'];
+
     constructor() {
         this.historyNode = document.getElementById('chat-history');
         this.compositorNode = document.getElementById('compositor-node');
@@ -11,7 +24,7 @@ class ScribeCompositor {
         this.mathRenderCache = new Map();
         this.messageCount = 0;
         this._forceStickyFollow = false;
-
+        
         this.editorObserver = new ResizeObserver((entries) => {
             window.requestAnimationFrame(() => {
                 let layoutChanged = false;
@@ -31,56 +44,10 @@ class ScribeCompositor {
             });
         });
 
-        this._injectImmutableAlignmentStyles();
         this._configureAcePaths();
         this._configureMarkdown();
         this._setupOrchestratorObserver();
         this._setupManualScrollInterceptors();
-    }
-
-    _injectImmutableAlignmentStyles() {
-        if (document.getElementById('scribe-alignment-reset')) return;
-        const style = document.createElement('style');
-        style.id = 'scribe-alignment-reset';
-        style.textContent = `
-            .node-content, .scribe-text-block, .markdown-body, .scribe-thought-block, .thought-content {
-                text-align: left;
-            }
-            .scribe-math-block {
-                text-align: center;
-                line-height: normal;
-                color: inherit !important;
-                display: block;
-                margin: 1em 0;
-            }
-            .scribe-math-inline {
-                display: inline-block;
-                vertical-align: middle;
-                text-align: initial;
-                color: inherit !important;
-            }
-            .scribe-math-block .katex, .scribe-math-inline .katex {
-                color: inherit !important;
-            }
-            .scribe-math-block .katex-display, .scribe-math-inline .katex-display {
-                color: inherit !important;
-                margin: 0;
-            }
-            .scribe-ace-editor {
-                min-height: 80px;
-                height: auto;
-                width: 100%;
-                display: block;
-                text-align: initial;
-                direction: ltr;
-            }
-            .scribe-markdown-preview-block {
-                width: 100%;
-                box-sizing: border-box;
-                text-align: left;
-            }
-        `;
-        document.head.appendChild(style);
     }
 
     _setupOrchestratorObserver() {
@@ -103,18 +70,9 @@ class ScribeCompositor {
 
     _setupManualScrollInterceptors() {
         if (!this.historyNode) return;
-        
         this.historyNode.addEventListener('scroll', () => {
             if (this.activeStreams.size > 0) {
-                const threshold = 120;
-                const totalScrollable = this.historyNode.scrollHeight - this.historyNode.clientHeight;
-                const currentScrollOffset = totalScrollable - this.historyNode.scrollTop;
-                
-                if (currentScrollOffset <= threshold) {
-                    this._forceStickyFollow = true;
-                } else {
-                    this._forceStickyFollow = false;
-                }
+                this._forceStickyFollow = this._isScrolledToBottom();
             }
         }, { passive: true });
     }
@@ -134,16 +92,14 @@ class ScribeCompositor {
             const renderer = {
                 code(code, infostring) {
                     const lang = (infostring || '').toLowerCase();
-
                     if (['markdown', 'md'].includes(lang)) {
                         return `<div class="scribe-markdown-preview-block markdown-body static-markdown-nested" data-val="${btoa(encodeURIComponent(code))}"></div>`;
                     }
-
                     return `
                         <div class="scribe-native-code-wrapper dynamic-markdown-code" data-lang="${lang}">
                             <div class="ace-action-bar micro-action-bar">
                                 <span class="ace-lang-label">${(lang || 'CODE').toUpperCase()}</span>
-                                <button class="action-btn ace-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.scribe-native-code-wrapper').querySelector('.streaming-code-payload').textContent)">Copy</button>
+                                <button class="action-btn ace-copy-btn" onclick="Compositor._handleInlineCopy(this)">Copy</button>
                             </div>
                             <div class="scribe-text-block scribe-code-native">
                                 <pre style="margin:0;"><code class="streaming-code-payload">${self._escapeHtml(code)}</code></pre>
@@ -161,6 +117,25 @@ class ScribeCompositor {
         }
     }
 
+    _handleInlineCopy(button) {
+        const wrapper = button.closest('.scribe-native-code-wrapper');
+        const payload = wrapper ? wrapper.querySelector('.streaming-code-payload')?.textContent : '';
+        if (payload) {
+            this._copyTextWithFeedback(payload, button, 'Copy', 'Copied!');
+        }
+    }
+
+    _copyTextWithFeedback(text, button, originalText, successText) {
+        navigator.clipboard.writeText(text).then(() => {
+            button.textContent = successText;
+            button.classList.add('success');
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.classList.remove('success');
+            }, 2000);
+        });
+    }
+
     _escapeHtml(unsafeText) {
         if (!unsafeText) return '';
         let result = '';
@@ -176,6 +151,31 @@ class ScribeCompositor {
         return result;
     }
 
+    _isSupportedCodeLanguage(langHint) {
+        if (!langHint) return false;
+        let cleanHint = "";
+        for (let i = 0; i < langHint.length; i++) {
+            const code = langHint.charCodeAt(i);
+            if (code > 32) cleanHint += langHint[i].toLowerCase();
+        }
+        if (ScribeCompositor.BARRED_FROM_ACE.has(cleanHint)) return false;
+        
+        const targetLang = ScribeCompositor.AI_QUIRKS[cleanHint] || cleanHint;
+        if (window.ace && window.ace.require) {
+            try {
+                const modelist = window.ace.require("ace/ext/modelist");
+                if (modelist) {
+                    if (modelist.modesByName[targetLang]) return true;
+                    const resolvedMode = modelist.getModeForPath(`virtual_file.${targetLang}`);
+                    if (resolvedMode && resolvedMode.name !== "text" && resolvedMode.name !== "plain_text") {
+                        return true;
+                    }
+                }
+            } catch (e) {}
+        }
+        return false;
+    }
+
     _resolveAceMode(langHint) {
         if (!langHint) return "ace/mode/text";
         let cleanHint = "";
@@ -184,20 +184,7 @@ class ScribeCompositor {
             if (code > 32) cleanHint += langHint[i].toLowerCase();
         }
         
-        const aiQuirks = {
-            'python3': 'python', 'py3': 'python', 'html5': 'html',
-            'postgres': 'pgsql', 'postgresql': 'pgsql',
-            'kubernetes': 'yaml', 'k8s': 'yaml',
-            'make': 'makefile',
-            'react': 'jsx', 'reactjs': 'jsx', 'vue3': 'vue', 'vue2': 'vue',
-            'bash': 'sh', 'shell': 'sh', 'zsh': 'sh', 'c++': 'c_cpp', 'cpp': 'c_cpp', 'c': 'c_cpp',
-            'c#': 'csharp', 'cs': 'csharp', 'f#': 'fsharp', 'fs': 'fsharp',
-            'go': 'golang', 'rs': 'rust', 'rb': 'ruby', 'py': 'python',
-            'js': 'javascript', 'ts': 'typescript', 'yml': 'yaml',
-            'docker': 'dockerfile', 'node': 'javascript', 'md': 'markdown'
-        };
-        const targetLang = aiQuirks[cleanHint] || cleanHint;
-
+        const targetLang = ScribeCompositor.AI_QUIRKS[cleanHint] || cleanHint;
         if (window.ace && window.ace.require) {
             try {
                 const modelist = window.ace.require("ace/ext/modelist");
@@ -222,7 +209,7 @@ class ScribeCompositor {
             backslashCount++;
             j--;
         }
-        return (backslashCount % 2 !== 0); 
+        return (backslashCount % 2 !== 0);
     }
 
     _healKaTeX(tex) {
@@ -285,11 +272,10 @@ class ScribeCompositor {
         if (!attrStr) return attrs;
         let i = 0;
         const len = attrStr.length;
-        let state = 'SCAN_KEY'; 
+        let state = 'SCAN_KEY';
         let currentKey = '';
         let currentValue = '';
         let quoteChar = '';
-
         const neutralize = (ch) => {
             if (ch === '"') return '&quot;';
             if (ch === "'") return '&#039;';
@@ -297,7 +283,6 @@ class ScribeCompositor {
             if (ch === '>') return '&gt;';
             return ch;
         };
-
         while (i < len) {
             const ch = attrStr[i];
             const code = attrStr.charCodeAt(i);
@@ -368,8 +353,7 @@ class ScribeCompositor {
         let root = streamContext.astRoot || { type: 'root', children: [] };
         let stack = streamContext.parseStack || [root];
         let currentText = streamContext.textBuffer || "";
-        
-        const targetTags = ['think', 'rlm_exec', 'rlm_result', 'status', 'candidate', 'evaluation', 'winner', 'artifact'];
+
         const flushText = () => {
             if (currentText) {
                 const active = stack[stack.length - 1];
@@ -384,304 +368,314 @@ class ScribeCompositor {
             }
         };
 
-        if (i < len) {
-            while (i < len) {
-                const isEscapedToken = this._isEscaped(newText, i);
-
-                let structuralClosedIdx = -1;
-                if (!isEscapedToken) {
-                    for (let s = stack.length - 1; s > 0; s--) {
-                        const activeContainerType = stack[s].type;
-                        if (targetTags.includes(activeContainerType)) {
-                            if (newText.startsWith(`</${activeContainerType}>`, i)) {
-                                structuralClosedIdx = s;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (structuralClosedIdx !== -1) {
-                    flushText();
-                    while (stack.length > structuralClosedIdx) {
-                        let closedNode = stack.pop();
-                        closedNode.isComplete = true;
-                        if (closedNode.type === 'artifact') {
-                            closedNode.content = currentText;
-                            currentText = "";
-                        }
-                    }
-                    const triggeredTag = targetTags.find(tag => newText.startsWith(`</${tag}>`, i));
-                    i += `</${triggeredTag}>`.length;
-
-                    streamContext.mathState = 'none';
-                    streamContext.currentMathBuffer = "";
-                    streamContext.inInlineCode = false;
-                    streamContext.activeInlineLength = 0;
-                    continue;
-                }
-
-                const currentContext = stack[stack.length - 1];
-
-                if (currentContext.type === 'code_block') {
-                    if (!currentContext.isLanguageSettled) {
-                        let settled = false;
-                        while (i < len) {
-                            if (newText[i] === '\n') {
-                                settled = true;
-                                i++;
-                                break;
-                            }
-                            if (newText[i] !== '\r') {
-                                currentContext.attributes += newText[i];
-                            }
-                            i++;
-                        }
-                        currentContext.attributes = currentContext.attributes.trim();
-                        if (settled) {
-                            currentContext.isLanguageSettled = true;
-                        }
-                        continue;
-                    }
-
-                    let tickCount = 0;
-                    while (i + tickCount < len && newText[i + tickCount] === '`') {
-                        tickCount++;
-                    }
-                    if (tickCount >= currentContext.fenceLength && !isEscapedToken) {
-                        currentContext.content = currentText;
-                        currentText = "";
-                        currentContext.isComplete = true;
-                        stack.pop();
-                        i += tickCount;
-                        if (i < len && newText[i] === '\n') i++;
-                        continue;
-                    }
-                    currentText += newText[i];
-                    i++;
-                    continue;
-                }
-
-                if (!isEscapedToken) {
-                    if (newText[i] === '<') {
-                        let remaining = newText.substring(i);
-                        let isPrefix = false;
-                        for (let t = 0; t < targetTags.length; t++) {
-                            let openT = '<' + targetTags[t];
-                            if (openT.startsWith(remaining) && remaining.length < openT.length) {
-                                isPrefix = true; break;
-                            }
-                        }
-                        for (let s = 1; s < stack.length; s++) {
-                            let closeT = `</${stack[s].type}>`;
-                            if (closeT.startsWith(remaining) && remaining.length < closeT.length) {
-                                isPrefix = true; break;
-                            }
-                        }
-                        if (isPrefix) break; 
-                    }
-                    if (newText[i] === '\\') {
-                        let remaining = newText.substring(i);
-                        if (remaining === '\\' || '\\begin{'.startsWith(remaining) || '\\end{'.startsWith(remaining) || 
-                            '\\['.startsWith(remaining) || '\\('.startsWith(remaining) || 
-                            '\\]'.startsWith(remaining) || '\\)'.startsWith(remaining)) {
+        while (i < len) {
+            const isEscapedToken = this._isEscaped(newText, i);
+            let structuralClosedIdx = -1;
+            
+            if (!isEscapedToken) {
+                for (let s = stack.length - 1; s > 0; s--) {
+                    const activeContainerType = stack[s].type;
+                    if (ScribeCompositor.TARGET_TAGS.includes(activeContainerType)) {
+                        if (newText.startsWith(`</${activeContainerType}>`, i)) {
+                            structuralClosedIdx = s;
                             break;
                         }
                     }
-                    if (newText[i] === '$') {
-                        if (i + 1 === len) break;
-                    }
-                    if (newText[i] === '`') {
-                        let tCount = 0;
-                        while (i + tCount < len && newText[i + tCount] === '`') { tCount++; }
-                        if (i + tCount === len) break;
+                }
+            }
+
+            if (structuralClosedIdx !== -1) {
+                flushText();
+                while (stack.length > structuralClosedIdx) {
+                    let closedNode = stack.pop();
+                    closedNode.isComplete = true;
+                    if (closedNode.type === 'artifact') {
+                        closedNode.content = currentText;
+                        currentText = "";
                     }
                 }
+                const triggeredTag = ScribeCompositor.TARGET_TAGS.find(tag => newText.startsWith(`</${tag}>`, i));
+                i += `</${triggeredTag}>`.length;
+                streamContext.mathState = 'none';
+                streamContext.currentMathBuffer = "";
+                streamContext.inInlineCode = false;
+                streamContext.activeInlineLength = 0;
+                continue;
+            }
 
+            const currentContext = stack[stack.length - 1];
+            if (currentContext.type === 'code_block') {
+                if (!currentContext.isLanguageSettled) {
+                    let settled = false;
+                    while (i < len) {
+                        if (newText[i] === '\n') {
+                            settled = true;
+                            i++;
+                            break;
+                        }
+                        if (newText[i] !== '\r') {
+                            currentContext.attributes += newText[i];
+                        }
+                        i++;
+                    }
+                    currentContext.attributes = currentContext.attributes.trim();
+                    if (settled) {
+                        currentContext.isLanguageSettled = true;
+                    }
+                    continue;
+                }
                 let tickCount = 0;
                 while (i + tickCount < len && newText[i + tickCount] === '`') {
                     tickCount++;
                 }
+                if (tickCount >= currentContext.fenceLength && !isEscapedToken) {
+                    currentContext.content = currentText;
+                    currentText = "";
+                    currentContext.isComplete = true;
+                    stack.pop();
+                    i += tickCount;
+                    if (i < len && newText[i] === '\n') i++;
+                    continue;
+                }
+                currentText += newText[i];
+                i++;
+                continue;
+            }
 
-                if (tickCount > 0 && !isEscapedToken) {
-                    if (streamContext.mathState === 'none') {
-                        if (!streamContext.inInlineCode) {
-                            if (tickCount >= 3) {
-                                flushText();
-                                let langHint = '';
-                                let nextIdx = i + tickCount;
-                                while (nextIdx < len && newText[nextIdx] !== '\n') {
-                                    if (newText[nextIdx] !== '\r') langHint += newText[nextIdx];
-                                    nextIdx++;
-                                }
-                                let hasNewline = false;
-                                if (nextIdx < len && newText[nextIdx] === '\n') {
+            if (!isEscapedToken) {
+                if (newText[i] === '<') {
+                    let remaining = newText.substring(i);
+                    let isPrefix = false;
+                    for (let t = 0; t < ScribeCompositor.TARGET_TAGS.length; t++) {
+                        let openT = '<' + ScribeCompositor.TARGET_TAGS[t];
+                        if (openT.startsWith(remaining) && remaining.length < openT.length) {
+                            isPrefix = true; break;
+                        }
+                    }
+                    for (let s = 1; s < stack.length; s++) {
+                        let closeT = `</${stack[s].type}>`;
+                        if (closeT.startsWith(remaining) && remaining.length < closeT.length) {
+                            isPrefix = true; break;
+                        }
+                    }
+                    if (isPrefix) break;
+                }
+                if (newText[i] === '\\') {
+                    let remaining = newText.substring(i);
+                    if (remaining === '\\' || '\\begin{'.startsWith(remaining) || '\\end{'.startsWith(remaining) || 
+                        '\\['.startsWith(remaining) || '\\('.startsWith(remaining) || 
+                        '\\]'.startsWith(remaining) || '\\)'.startsWith(remaining)) {
+                        break;
+                    }
+                }
+                if (newText[i] === '$') {
+                    if (i + 1 === len) break;
+                }
+                if (newText[i] === '`') {
+                    let tCount = 0;
+                    while (i + tCount < len && newText[i + tCount] === '`') { tCount++; }
+                    if (i + tCount === len) break;
+                }
+            }
+
+            let tickCount = 0;
+            while (i + tickCount < len && newText[i + tickCount] === '`') {
+                tickCount++;
+            }
+
+            if (tickCount > 0 && !isEscapedToken) {
+                if (streamContext.mathState === 'none') {
+                    if (!streamContext.inInlineCode) {
+                        if (tickCount >= 3) {
+                            let nextIdx = i + tickCount;
+                            let hasNewline = false;
+                            while (nextIdx < len) {
+                                if (newText[nextIdx] === '\n') {
                                     hasNewline = true;
-                                    nextIdx++;
+                                    break;
                                 }
+                                nextIdx++;
+                            }
+                            if (!hasNewline) {
+                                break;
+                            }
+                            let langHint = '';
+                            let scanIdx = i + tickCount;
+                            while (scanIdx < nextIdx) {
+                                if (newText[scanIdx] !== '\r') {
+                                    langHint += newText[scanIdx];
+                                }
+                                scanIdx++;
+                            }
+                            langHint = langHint.trim();
+                            if (this._isSupportedCodeLanguage(langHint)) {
+                                flushText();
                                 let codeBlockNode = {
                                     type: 'code_block',
                                     content: '',
-                                    attributes: langHint.trim(),
+                                    attributes: langHint,
                                     fenceLength: tickCount,
                                     isComplete: false,
-                                    isLanguageSettled: hasNewline,
+                                    isLanguageSettled: true,
                                     children: []
                                 };
                                 currentContext.children.push(codeBlockNode);
                                 stack.push(codeBlockNode);
-                                i = nextIdx;
+                                i = nextIdx + 1;
                                 continue;
                             } else {
-                                streamContext.inInlineCode = true;
-                                streamContext.activeInlineLength = tickCount;
+                                currentText += newText.substring(i, nextIdx + 1);
+                                i = nextIdx + 1;
+                                continue;
                             }
-                        } else if (tickCount === streamContext.activeInlineLength) {
-                            streamContext.inInlineCode = false;
-                            streamContext.activeInlineLength = 0;
+                        } else {
+                            streamContext.inInlineCode = true;
+                            streamContext.activeInlineLength = tickCount;
                         }
-                    } else {
-                        streamContext.currentMathBuffer += newText.substring(i, i + tickCount);
-                        i += tickCount;
-                        continue;
+                    } else if (tickCount === streamContext.activeInlineLength) {
+                        streamContext.inInlineCode = false;
+                        streamContext.activeInlineLength = 0;
                     }
-                    currentText += newText.substring(i, i + tickCount);
+                } else {
+                    streamContext.currentMathBuffer += newText.substring(i, i + tickCount);
                     i += tickCount;
                     continue;
                 }
-
-                let tagMatched = false;
-                if (streamContext.mathState === 'none' && !streamContext.inInlineCode) {
-                    if (newText[i] === '<' && i + 1 < len && newText[i + 1] !== '/') {
-                        let matchedTag = null;
-                        for (let t = 0; t < targetTags.length; t++) {
-                            const tag = targetTags[t];
-                            if (newText.startsWith(tag, i + 1)) {
-                                const nextChar = newText[i + 1 + tag.length];
-                                if (nextChar === '>' || nextChar === ' ' || nextChar === '\t' || nextChar === '\n' || nextChar === '\r') {
-                                    matchedTag = tag; break;
-                                }
-                            }
-                        }
-                        if (matchedTag) {
-                            const attrStart = i + 1 + matchedTag.length;
-                            let tagEndIndex = -1;
-                            let inQuote = null;
-                            for (let k = attrStart; k < len; k++) {
-                                const c = newText[k];
-                                if (c === '"' || c === "'") {
-                                    if (!inQuote) inQuote = c;
-                                    else if (inQuote === c) inQuote = null;
-                                } else if (c === '>' && !inQuote) {
-                                    tagEndIndex = k; break;
-                                }
-                            }
-                            if (tagEndIndex !== -1) {
-                                flushText();
-                                const newAttr = newText.substring(attrStart, tagEndIndex).trim();
-                                let containerBlock = {
-                                    type: matchedTag,
-                                    content: '',
-                                    attributes: newAttr,
-                                    isComplete: false,
-                                    children: []
-                                };
-                                currentContext.children.push(containerBlock);
-                                stack.push(containerBlock);
-                                i = tagEndIndex + 1;
-                                tagMatched = true; continue;
-                            }
-                        }
-                    }
-                }
-                if (tagMatched) continue;
-
-                if (!streamContext.inInlineCode) {
-                    if (streamContext.mathState === 'none') {
-                        if (newText.startsWith('$$', i)) { flushText(); streamContext.mathState = 'block_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue; }
-                        if (newText.startsWith('\\[', i)) { flushText(); streamContext.mathState = 'block_bracket'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue; }
-                        if (newText.startsWith('\\(', i)) { flushText(); streamContext.mathState = 'inline_paren'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue; }
-                        if (newText.startsWith('\\begin{', i)) {
-                            const closeBrace = newText.indexOf('}', i + 7);
-                            if (closeBrace !== -1) {
-                                const env = newText.substring(i + 7, closeBrace);
-                                const mathEnvs = ['align', 'align*', 'equation', 'equation*', 'eqnarray', 'eqnarray*', 'gather', 'gather*', 'cases'];
-                                if (mathEnvs.includes(env)) {
-                                    flushText(); streamContext.mathState = 'env'; streamContext.braceDepth = 0; streamContext.activeEnvName = env;
-                                    streamContext.currentMathBuffer = newText.substring(i, closeBrace + 1);
-                                    i = closeBrace + 1; continue;
-                                }
-                            }
-                        }
-                        if (newText[i] === '$') {
-                            if (i + 1 < len && newText[i+1] !== ' ' && !(newText[i+1] >= '0' && newText[i+1] <= '9')) {
-                                flushText(); streamContext.mathState = 'inline_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i++; continue;
-                            }
-                        }
-                    } else {
-                        if (newText[i] === '{') { streamContext.braceDepth++; streamContext.currentMathBuffer += newText[i]; i++; continue; }
-                        if (newText[i] === '}') { streamContext.braceDepth = Math.max(0, streamContext.braceDepth - 1); streamContext.currentMathBuffer += newText[i]; i++; continue; }
-
-                        if (streamContext.mathState === 'block_dollar') {
-                            if (newText.startsWith('$$', i) && streamContext.braceDepth === 0) {
-                                currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
-                                streamContext.mathState = 'none'; i += 2; continue;
-                            }
-                            streamContext.currentMathBuffer += newText[i]; i++; continue;
-                        }
-                        else if (streamContext.mathState === 'block_bracket') {
-                            if (newText.startsWith('\\]', i) && streamContext.braceDepth === 0) {
-                                currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
-                                streamContext.mathState = 'none'; i += 2; continue;
-                            }
-                            streamContext.currentMathBuffer += newText[i]; i++; continue;
-                        }
-                        else if (streamContext.mathState === 'inline_paren') {
-                            if (this._checkDoubleNewlineBoundary(newText, i) && streamContext.braceDepth === 0) {
-                                currentText += '\\(' + streamContext.currentMathBuffer + '\n'; streamContext.mathState = 'none'; i++; continue;
-                            }
-                            if (newText.startsWith('\\)', i) && streamContext.braceDepth === 0) {
-                                currentText += `SCRIBEMATHINLINEX${streamContext.mathRegistry.length}X`;
-                                streamContext.mathRegistry.push({ type: 'inline', b64: '', tex: streamContext.currentMathBuffer });
-                                streamContext.mathState = 'none'; i += 2; continue;
-                            }
-                            streamContext.currentMathBuffer += newText[i]; i++; continue;
-                        }
-                        else if (streamContext.mathState === 'inline_dollar') {
-                            if (newText.startsWith('$$', i) && streamContext.braceDepth === 0) {
-                                currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: false, children: [] });
-                                streamContext.mathState = 'block_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue;
-                            }
-                            if (this._checkDoubleNewlineBoundary(newText, i) && streamContext.braceDepth === 0) {
-                                currentText += '$' + streamContext.currentMathBuffer + '\n'; streamContext.mathState = 'none'; i++; continue;
-                            }
-                            if (newText[i] === '$' && streamContext.braceDepth === 0) {
-                                currentText += `SCRIBEMATHINLINEX${streamContext.mathRegistry.length}X`;
-                                streamContext.mathRegistry.push({ type: 'inline', b64: '', tex: streamContext.currentMathBuffer });
-                                streamContext.mathState = 'none'; i += 1; continue;
-                            }
-                            streamContext.currentMathBuffer += newText[i]; i++; continue;
-                        }
-                        else if (streamContext.mathState === 'env') {
-                            const closeTag = `\\end{${streamContext.activeEnvName}}`;
-                            if (newText.startsWith(closeTag, i) && streamContext.braceDepth === 0) {
-                                streamContext.currentMathBuffer += closeTag;
-                                currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
-                                streamContext.mathState = 'none'; streamContext.activeEnvName = ""; i += closeTag.length; continue;
-                            }
-                            streamContext.currentMathBuffer += newText[i]; i++; continue;
-                        }
-                    }
-                }
-                if (streamContext.mathState === 'none') currentText += newText[i];
-                i++;
+                currentText += newText.substring(i, i + tickCount);
+                i += tickCount;
+                continue;
             }
 
-            streamContext.cursorIndex = i;
-            streamContext.textBuffer = currentText;
-            streamContext.astRoot = root;
-            streamContext.parseStack = stack;
+            let tagMatched = false;
+            if (streamContext.mathState === 'none' && !streamContext.inInlineCode) {
+                if (newText[i] === '<' && i + 1 < len && newText[i + 1] !== '/') {
+                    let matchedTag = null;
+                    for (let t = 0; t < ScribeCompositor.TARGET_TAGS.length; t++) {
+                        const tag = ScribeCompositor.TARGET_TAGS[t];
+                        if (newText.startsWith(tag, i + 1)) {
+                            const nextChar = newText[i + 1 + tag.length];
+                            if (nextChar === '>' || nextChar === ' ' || nextChar === '\t' || nextChar === '\n' || nextChar === '\r') {
+                                matchedTag = tag; break;
+                            }
+                        }
+                    }
+                    if (matchedTag) {
+                        const attrStart = i + 1 + matchedTag.length;
+                        let tagEndIndex = -1;
+                        let inQuote = null;
+                        for (let k = attrStart; k < len; k++) {
+                            const c = newText[k];
+                            if (c === '"' || c === "'") {
+                                if (!inQuote) inQuote = c;
+                                else if (inQuote === c) inQuote = null;
+                            } else if (c === '>' && !inQuote) {
+                                tagEndIndex = k; break;
+                            }
+                        }
+                        if (tagEndIndex !== -1) {
+                            flushText();
+                            const newAttr = newText.substring(attrStart, tagEndIndex).trim();
+                            let containerBlock = {
+                                type: matchedTag,
+                                content: '',
+                                attributes: newAttr,
+                                isComplete: false,
+                                children: []
+                            };
+                            currentContext.children.push(containerBlock);
+                            stack.push(containerBlock);
+                            i = tagEndIndex + 1;
+                            tagMatched = true; continue;
+                        }
+                    }
+                }
+            }
+            if (tagMatched) continue;
+
+            if (!streamContext.inInlineCode) {
+                if (streamContext.mathState === 'none') {
+                    if (newText.startsWith('$$', i)) { flushText(); streamContext.mathState = 'block_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue; }
+                    if (newText.startsWith('\\[', i)) { flushText(); streamContext.mathState = 'block_bracket'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue; }
+                    if (newText.startsWith('\\(', i)) { flushText(); streamContext.mathState = 'inline_paren'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue; }
+                    if (newText.startsWith('\\begin{', i)) {
+                        const closeBrace = newText.indexOf('}', i + 7);
+                        if (closeBrace !== -1) {
+                            const env = newText.substring(i + 7, closeBrace);
+                            const mathEnvs = ['align', 'align*', 'equation', 'equation*', 'eqnarray', 'eqnarray*', 'gather', 'gather*', 'cases'];
+                            if (mathEnvs.includes(env)) {
+                                flushText(); streamContext.mathState = 'env'; streamContext.braceDepth = 0; streamContext.activeEnvName = env;
+                                streamContext.currentMathBuffer = newText.substring(i, closeBrace + 1);
+                                i = closeBrace + 1; continue;
+                            }
+                        }
+                    }
+                    if (newText[i] === '$') {
+                        if (i + 1 < len && newText[i+1] !== ' ' && !(newText[i+1] >= '0' && newText[i+1] <= '9')) {
+                            flushText(); streamContext.mathState = 'inline_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i++; continue;
+                        }
+                    }
+                } else {
+                    if (newText[i] === '{') { streamContext.braceDepth++; streamContext.currentMathBuffer += newText[i]; i++; continue; }
+                    if (newText[i] === '}') { streamContext.braceDepth = Math.max(0, streamContext.braceDepth - 1); streamContext.currentMathBuffer += newText[i]; i++; continue; }
+                    if (streamContext.mathState === 'block_dollar') {
+                        if (newText.startsWith('$$', i) && streamContext.braceDepth === 0) {
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
+                            streamContext.mathState = 'none'; i += 2; continue;
+                        }
+                        streamContext.currentMathBuffer += newText[i]; i++; continue;
+                    }
+                    else if (streamContext.mathState === 'block_bracket') {
+                        if (newText.startsWith('\\]', i) && streamContext.braceDepth === 0) {
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
+                            streamContext.mathState = 'none'; i += 2; continue;
+                        }
+                        streamContext.currentMathBuffer += newText[i]; i++; continue;
+                    }
+                    else if (streamContext.mathState === 'inline_paren') {
+                        if (this._checkDoubleNewlineBoundary(newText, i) && streamContext.braceDepth === 0) {
+                            currentText += '\\(' + streamContext.currentMathBuffer + '\n'; streamContext.mathState = 'none'; i++; continue;
+                        }
+                        if (newText.startsWith('\\)', i) && streamContext.braceDepth === 0) {
+                            currentText += `SCRIBEMATHINLINEX${streamContext.mathRegistry.length}X`;
+                            streamContext.mathRegistry.push({ type: 'inline', b64: '', tex: streamContext.currentMathBuffer });
+                            streamContext.mathState = 'none'; i += 2; continue;
+                        }
+                        streamContext.currentMathBuffer += newText[i]; i++; continue;
+                    }
+                    else if (streamContext.mathState === 'inline_dollar') {
+                        if (newText.startsWith('$$', i) && streamContext.braceDepth === 0) {
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: false, children: [] });
+                            streamContext.mathState = 'block_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue;
+                        }
+                        if (this._checkDoubleNewlineBoundary(newText, i) && streamContext.braceDepth === 0) {
+                            currentText += '$' + streamContext.currentMathBuffer + '\n'; streamContext.mathState = 'none'; i++; continue;
+                        }
+                        if (newText[i] === '$' && streamContext.braceDepth === 0) {
+                            currentText += `SCRIBEMATHINLINEX${streamContext.mathRegistry.length}X`;
+                            streamContext.mathRegistry.push({ type: 'inline', b64: '', tex: streamContext.currentMathBuffer });
+                            streamContext.mathState = 'none'; i += 1; continue;
+                        }
+                        streamContext.currentMathBuffer += newText[i]; i++; continue;
+                    }
+                    else if (streamContext.mathState === 'env') {
+                        const closeTag = `\\end{${streamContext.activeEnvName}}`;
+                        if (newText.startsWith(closeTag, i) && streamContext.braceDepth === 0) {
+                            streamContext.currentMathBuffer += closeTag;
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
+                            streamContext.mathState = 'none'; streamContext.activeEnvName = ""; i += closeTag.length; continue;
+                        }
+                        streamContext.currentMathBuffer += newText[i]; i++; continue;
+                    }
+                }
+            }
+            if (streamContext.mathState === 'none') currentText += newText[i];
+            i++;
         }
+
+        streamContext.cursorIndex = i;
+        streamContext.textBuffer = currentText;
+        streamContext.astRoot = root;
+        streamContext.parseStack = stack;
 
         let clonedRoot = { ...root, children: [...root.children] };
         let currentClone = clonedRoot;
@@ -706,8 +700,8 @@ class ScribeCompositor {
         if (i < len) {
             let trailing = newText.substring(i);
             let isTagPrefix = false;
-            for (let t = 0; t < targetTags.length; t++) {
-                if (('<' + targetTags[t]).startsWith(trailing) || `</${targetTags[t]}>`.startsWith(trailing)) {
+            for (let t = 0; t < ScribeCompositor.TARGET_TAGS.length; t++) {
+                if (('<' + ScribeCompositor.TARGET_TAGS[t]).startsWith(trailing) || `</${ScribeCompositor.TARGET_TAGS[t]}>`.startsWith(trailing)) {
                     isTagPrefix = true;
                     break;
                 }
@@ -716,6 +710,7 @@ class ScribeCompositor {
                 speculativeText += trailing;
             }
         }
+
         if (streamContext.mathState === 'inline_dollar') {
             speculativeText += '$' + streamContext.currentMathBuffer;
         } else if (streamContext.mathState === 'inline_paren') {
@@ -732,7 +727,6 @@ class ScribeCompositor {
         }
 
         streamContext.parsedBlocks = clonedRoot.children;
-
         for (let m = 0; m < streamContext.mathRegistry.length; m++) {
             if (!streamContext.mathRegistry[m].b64) {
                 streamContext.mathRegistry[m].b64 = btoa(encodeURIComponent(streamContext.mathRegistry[m].tex));
@@ -743,12 +737,9 @@ class ScribeCompositor {
     streamToken(msgId, token) {
         const stream = this.activeStreams.get(msgId);
         if (!stream) return;
-
         const currentText = (this.messageRegistry.get(msgId) || "") + token;
         this.messageRegistry.set(msgId, currentText);
-
         this._lexicalStreamParse(stream, currentText);
-
         if (!stream.isPendingRender) {
             stream.isPendingRender = true;
             const now = performance.now();
@@ -775,27 +766,23 @@ class ScribeCompositor {
                 return NodeFilter.FILTER_ACCEPT;
             }
         }, false);
-
         const textNodes = [];
         let node;
         while (node = walker.nextNode()) {
             textNodes.push(node);
         }
-
         for (let n = 0; n < textNodes.length; n++) {
             const textNode = textNodes[n];
             let text = textNode.nodeValue;
-            if (!text || text.indexOf('SCRIBEMATH') !== -1) continue; 
+            if (!text || text.indexOf('SCRIBEMATH') !== -1) continue;
             
             let i = 0;
             const len = text.length;
             let fragment = null;
-
             while (i < len) {
                 let matchType = null;
                 let startDelimiter = "";
                 let endDelimiter = "";
-
                 if (text.startsWith('$$', i)) { matchType = 'block'; startDelimiter = '$$'; endDelimiter = '$$'; }
                 else if (text.startsWith('\\[', i)) { matchType = 'block'; startDelimiter = '\\['; endDelimiter = '\\]'; }
                 else if (text.startsWith('\\(', i)) { matchType = 'inline'; startDelimiter = '\\('; endDelimiter = '\\)'; }
@@ -804,25 +791,20 @@ class ScribeCompositor {
                         matchType = 'inline'; startDelimiter = '$'; endDelimiter = '$';
                     }
                 }
-
                 if (matchType) {
                     const startIdx = i;
                     const contentStart = i + startDelimiter.length;
                     const endIdx = text.indexOf(endDelimiter, contentStart);
-
                     if (endIdx !== -1) {
                         const mathContent = text.substring(contentStart, endIdx);
                         if (!fragment) fragment = textNode.ownerDocument.createDocumentFragment();
-
                         if (startIdx > 0) {
                             fragment.appendChild(textNode.ownerDocument.createTextNode(text.substring(0, startIdx)));
                         }
-
                         const mathSpan = textNode.ownerDocument.createElement('span');
                         mathSpan.className = matchType === 'block' ? 'scribe-math-block' : 'scribe-math-inline';
                         mathSpan.dataset.tex = btoa(encodeURIComponent(mathContent));
                         fragment.appendChild(mathSpan);
-
                         text = text.substring(endIdx + endDelimiter.length);
                         i = 0;
                         continue;
@@ -830,7 +812,6 @@ class ScribeCompositor {
                 }
                 i++;
             }
-
             if (fragment) {
                 if (text.length > 0) {
                     fragment.appendChild(textNode.ownerDocument.createTextNode(text));
@@ -846,7 +827,7 @@ class ScribeCompositor {
         let htmlOut = window.marked ? window.marked.parse(rawContent) : rawContent;
         if (window.DOMPurify) {
             htmlOut = window.DOMPurify.sanitize(htmlOut, {
-                ADD_TAGS: ['details', 'summary', 'artifact', 'span', 'div', 'think', 'rlm_exec', 'rlm_result', 'status', 'candidate', 'evaluation', 'winner'], 
+                ADD_TAGS: ['details', 'summary', 'artifact', 'span', 'div', 'think', 'rlm_exec', 'rlm_result', 'status', 'candidate', 'evaluation', 'winner'],
                 ADD_ATTR: ['data-tex', 'data-lang', 'data-filename', 'class', 'target', 'rel', 'data-block-type', 'data-vis-sealed', 'open', 'id', 'data-editor-id', 'data-val'],
                 CUSTOM_ELEMENT_HANDLING: {
                     tagNameCheck: () => true,
@@ -858,51 +839,38 @@ class ScribeCompositor {
         
         const tempNode = document.createElement('div');
         tempNode.innerHTML = htmlOut;
-
         tempNode.querySelectorAll('.static-markdown-nested').forEach((nestedWin) => {
             try {
                 const rawMarkdown = decodeURIComponent(atob(nestedWin.dataset.val));
                 nestedWin.innerHTML = window.marked ? window.marked.parse(rawMarkdown) : rawMarkdown;
             } catch(e) {}
         });
-
         this._discoverAndConvertLiteralMath(tempNode);
-
         const isInsideReasoningBox = targetElement && targetElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
-
         const currentPromotedPool = [];
-        const barredFromAce = ['mermaid', 'markdown', 'md', 'text', 'txt', 'prose'];
         tempNode.querySelectorAll('.dynamic-markdown-code').forEach((wrapper, idx) => {
-            if (!nodeObj.isComplete || isInsideReasoningBox) return; 
-
+            if (!nodeObj.isComplete || isInsideReasoningBox) return;
             const targetedLang = (wrapper.dataset.lang || 'text').toLowerCase();
-            if (barredFromAce.includes(targetedLang)) return;
-
+            if (!this._isSupportedCodeLanguage(targetedLang)) return;
             const stableEditorId = `${nodeObj.wrapper.id}-nested-markdown-${idx}`;
             const payload = wrapper.querySelector('.streaming-code-payload')?.textContent || '';
-
             const subContainer = document.createElement('div');
             subContainer.className = 'scribe-ace-wrapper-placeholder';
             subContainer.dataset.editorId = stableEditorId;
             subContainer.dataset.lang = targetedLang;
             subContainer.dataset.val = btoa(encodeURIComponent(payload));
-
             wrapper.parentNode.replaceChild(subContainer, wrapper);
             currentPromotedPool.push({ id: stableEditorId, lang: targetedLang, val: payload });
         });
-
         targetElement.innerHTML = tempNode.innerHTML;
-
         targetElement.querySelectorAll('.scribe-ace-wrapper-placeholder').forEach((placeholder) => {
             const editorId = placeholder.dataset.editorId;
             const matchData = currentPromotedPool.find(item => item.id === editorId);
             if (!matchData) return;
-
             const fullAceWrapper = document.createElement('div');
             fullAceWrapper.className = 'scribe-ace-wrapper';
             fullAceWrapper.dataset.aceInjected = "true";
             fullAceWrapper.dataset.editorId = editorId;
-
             const barLayout = document.createElement('div');
             barLayout.className = 'ace-action-bar';
             barLayout.innerHTML = `
@@ -913,25 +881,21 @@ class ScribeCompositor {
             const textSpace = document.createElement('div');
             textSpace.id = editorId;
             textSpace.className = 'scribe-ace-editor';
-
             fullAceWrapper.appendChild(barLayout);
             fullAceWrapper.appendChild(textSpace);
             placeholder.parentNode.replaceChild(fullAceWrapper, placeholder);
-
-            barLayout.querySelector('.ace-copy-btn').onclick = () => {
+            barLayout.querySelector('.ace-copy-btn').onclick = (e) => {
                 if (this.editorPool.has(editorId)) {
-                    navigator.clipboard.writeText(this.editorPool.get(editorId).getValue());
+                    this._copyTextWithFeedback(this.editorPool.get(editorId).getValue(), e.target, 'Copy Code', 'Copied!');
                 }
             };
-
             this._mountAceEditor(fullAceWrapper, textSpace, matchData.lang, matchData.val, true);
         });
-
         if (registry && registry.length > 0) this._injectMathNodes(targetElement, registry);
         if (window.katex) {
             targetElement.querySelectorAll('.scribe-math-inline, .scribe-math-block').forEach(el => {
                 if (el.closest('pre') || el.closest('code') || el.closest('.scribe-native-code-wrapper') || el.closest('.scribe-ace-wrapper')) {
-                    return; 
+                    return;
                 }
                 const b64 = el.dataset.tex;
                 if (!b64) return;
@@ -944,7 +908,7 @@ class ScribeCompositor {
                     try {
                         const decoded = atob(b64);
                         try { tex = decodeURIComponent(decoded); } catch(e) { tex = decoded; }
-                        tex = this._healKaTeX(tex); 
+                        tex = this._healKaTeX(tex);
                     } catch (decodeErr) {
                         return;
                     }
@@ -1049,7 +1013,6 @@ class ScribeCompositor {
         const activeModeName = aceModePath.split('/').pop();
         const skippedWorkerModes = ['text', 'plain', 'abstract', 'none', 'markdown', 'mermaid'];
         const shouldUseWorker = isFinalized && !skippedWorkerModes.includes(activeModeName);
-
         editor.setOptions({
             maxLines: 57,
             minLines: 4,
@@ -1057,14 +1020,13 @@ class ScribeCompositor {
             fontSize: "13px",
             fontFamily: "var(--font-code, ui-monospace, monospace)",
             showPrintMargin: false,
-            showGutter: true,               
-            showLineNumbers: true,          
-            fixedWidthGutter: true,         
-            useWorker: shouldUseWorker, 
+            showGutter: true,
+            showLineNumbers: true,
+            fixedWidthGutter: true,
+            useWorker: shouldUseWorker,
             showFoldWidgets: true,
             wrap: false,
             hScrollBarAlwaysVisible: false,
-            //indentedSoftWrap: true,
             highlightActiveLine: true,
             displayIndentGuides: true,
             highlightGutterLine: true,
@@ -1085,12 +1047,10 @@ class ScribeCompositor {
             editor.setValue(content || '', 1);
         }
         editor.clearSelection();
-
-        window.requestAnimationFrame(() => { 
-            editor.resize(); 
-            editor.renderer.updateFull(); 
+        window.requestAnimationFrame(() => {
+            editor.resize();
+            editor.renderer.updateFull();
         });
-
         if (wrapper && !this.observedNodes.has(editorId)) {
             this.editorObserver.observe(wrapper);
             this.observedNodes.set(editorId, wrapper);
@@ -1105,14 +1065,13 @@ class ScribeCompositor {
         const wrapper = document.createElement('div');
         wrapper.className = `message-node node-${role}`;
         wrapper.id = msgId;
-
         const label = document.createElement('div');
         label.className = 'node-label';
-        label.innerHTML = role === 'assistant' 
+        label.innerHTML = role === 'assistant'
             ? `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path><path d="M12 8a6 6 0 0 1 6 6v5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-5a6 6 0 0 1 6-6z"></path></svg> Scribe Engine`
             : `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> Operator`;
         wrapper.appendChild(label);
-
+        
         if (visualContext && visualContext.length > 0) {
             const contextTray = document.createElement('div');
             contextTray.className = 'node-visual-context';
@@ -1130,20 +1089,20 @@ class ScribeCompositor {
             contextTray.appendChild(fragment);
             wrapper.appendChild(contextTray);
         }
-
+        
         const content = document.createElement('div');
         content.className = 'node-content markdown-body';
         wrapper.appendChild(content);
         this.historyNode.appendChild(wrapper);
         this._forceStickyFollow = true;
-
+        
         if (role === 'assistant') {
             this.activeStreams.set(msgId, {
                 container: content,
                 isPendingRender: false,
                 isFinalized: false,
                 lastRenderTime: 0,
-                blockNodes: [], 
+                blockNodes: [],
                 cursorIndex: 0,
                 mathState: 'none',
                 currentMathBuffer: '',
@@ -1171,8 +1130,8 @@ class ScribeCompositor {
         );
         wrapper.id = prefixId;
         let target = wrapper;
-        wrapper.dataset.blockType = block.type; 
-
+        wrapper.dataset.blockType = block.type;
+        
         if (block.type === 'text') {
             wrapper.className = 'scribe-text-block';
         } else if (block.type === 'math_block') {
@@ -1180,13 +1139,11 @@ class ScribeCompositor {
             target = wrapper;
         } else if (block.type === 'code_block') {
             const lang = (block.attributes || '').toLowerCase();
-            const barredFromAce = ['mermaid', 'markdown', 'md', 'text', 'txt', 'prose', 'math', 'latex', 'katex'];
             const isSettled = block.isLanguageSettled !== false;
             const lineCount = (block.content || '').split('\n').length;
             
             const isMathLang = ['math', 'latex', 'katex'].includes(lang);
             const isInsideReasoningBox = containerElement && containerElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
-
             if (isMathLang) {
                 wrapper.className = 'scribe-math-block-container';
                 wrapper.dataset.aceInjected = "false";
@@ -1204,18 +1161,16 @@ class ScribeCompositor {
                 wrapper.dataset.aceInjected = "false";
                 wrapper.dataset.lang = lang;
                 target = wrapper;
-            } else if (isInsideReasoningBox || !isSettled || barredFromAce.includes(lang) || (lineCount < 3 && !block.isComplete)) {
+            } else if (isInsideReasoningBox || !isSettled || !this._isSupportedCodeLanguage(lang) || (lineCount < 3 && !block.isComplete)) {
                 wrapper.className = 'scribe-native-code-wrapper';
                 wrapper.dataset.aceInjected = "false";
                 wrapper.dataset.lang = lang;
-
                 const microBar = document.createElement('div');
                 microBar.className = 'ace-action-bar micro-action-bar';
                 
                 const langLabel = document.createElement('span');
                 langLabel.className = 'ace-lang-label';
                 langLabel.textContent = (block.attributes || 'CODE').toUpperCase();
-
                 const copyBtn = document.createElement('button');
                 copyBtn.className = 'action-btn ace-copy-btn';
                 copyBtn.innerHTML = 'Copy';
@@ -1230,30 +1185,20 @@ class ScribeCompositor {
                 wrapper.appendChild(microBar);
                 wrapper.appendChild(codeBody);
                 target = codeBody.querySelector('.streaming-code-payload');
-
                 copyBtn.onclick = () => {
                     const dynamicPayload = wrapper.querySelector('code.streaming-code-payload')?.textContent || '';
-                    navigator.clipboard.writeText(dynamicPayload).then(() => {
-                        copyBtn.innerHTML = 'Copied!';
-                        copyBtn.classList.add('success');
-                        setTimeout(() => {
-                            copyBtn.innerHTML = 'Copy';
-                            copyBtn.classList.remove('success');
-                        }, 2000);
-                    });
+                    this._copyTextWithFeedback(dynamicPayload, copyBtn, 'Copy', 'Copied!');
                 };
             } else {
                 wrapper.className = 'scribe-ace-wrapper';
                 wrapper.dataset.aceInjected = "true";
                 wrapper.dataset.editorId = prefixId;
-
                 const actionBar = document.createElement('div');
                 actionBar.className = 'ace-action-bar';
                 
                 const langLabel = document.createElement('span');
                 langLabel.className = 'ace-lang-label';
                 langLabel.textContent = block.attributes.toUpperCase() || "CODE";
-
                 const copyBtn = document.createElement('button');
                 copyBtn.className = 'action-btn ace-copy-btn';
                 copyBtn.innerHTML = 'Copy Code';
@@ -1268,17 +1213,9 @@ class ScribeCompositor {
                 wrapper.appendChild(actionBar);
                 wrapper.appendChild(editorDiv);
                 target = editorDiv;
-
                 copyBtn.onclick = () => {
                     if (this.editorPool.has(prefixId)) {
-                        navigator.clipboard.writeText(this.editorPool.get(prefixId).getValue()).then(() => {
-                            copyBtn.innerHTML = 'Copied!';
-                            copyBtn.classList.add('success');
-                            setTimeout(() => {
-                                copyBtn.innerHTML = 'Copy Code';
-                                copyBtn.classList.remove('success');
-                            }, 2000);
-                        });
+                        this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!');
                     }
                 };
             }
@@ -1286,14 +1223,13 @@ class ScribeCompositor {
             const attrs = this._parseAttributes(block.attributes);
             const lang = attrs['language'] || attrs['lang'] || 'text';
             const name = attrs['identifier'] || attrs['name'] || lang.toUpperCase();
-            const barredFromAce = ['math', 'latex', 'katex', 'mermaid', 'markdown', 'md', 'text', 'txt', 'prose'];
             
             if (['markdown', 'md'].includes(lang)) {
                 wrapper.className = 'scribe-markdown-preview-block markdown-body';
                 wrapper.dataset.aceInjected = "false";
                 wrapper.dataset.lang = lang;
                 target = wrapper;
-            } else if (barredFromAce.includes(lang)) {
+            } else if (!this._isSupportedCodeLanguage(lang)) {
                 wrapper.className = 'scribe-text-block scribe-artifact-native';
                 wrapper.dataset.lang = lang;
                 target = wrapper;
@@ -1301,14 +1237,12 @@ class ScribeCompositor {
                 wrapper.className = 'scribe-ace-wrapper';
                 wrapper.dataset.aceInjected = "true";
                 wrapper.dataset.editorId = prefixId;
-
                 const actionBar = document.createElement('div');
                 actionBar.className = 'ace-action-bar';
                 
                 const langLabel = document.createElement('span');
                 langLabel.className = 'ace-lang-label';
                 langLabel.textContent = name;
-
                 const copyBtn = document.createElement('button');
                 copyBtn.className = 'action-btn ace-copy-btn';
                 copyBtn.innerHTML = 'Copy Code';
@@ -1323,17 +1257,9 @@ class ScribeCompositor {
                 wrapper.appendChild(actionBar);
                 wrapper.appendChild(editorDiv);
                 target = editorDiv;
-
                 copyBtn.onclick = () => {
                     if (this.editorPool.has(prefixId)) {
-                        navigator.clipboard.writeText(this.editorPool.get(prefixId).getValue()).then(() => {
-                            copyBtn.innerHTML = 'Copied!';
-                            copyBtn.classList.add('success');
-                            setTimeout(() => {
-                                copyBtn.innerHTML = 'Copy Code';
-                                copyBtn.classList.remove('success');
-                            }, 2000);
-                        });
+                        this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!');
                     }
                 };
             }
@@ -1366,13 +1292,12 @@ class ScribeCompositor {
                 summary.className = 'thought-header';
                 summary.textContent = 'Critic Protocol';
             }
-
             wrapper.appendChild(summary);
             wrapper.appendChild(contentDiv);
             target = contentDiv;
         } else if (block.type === 'status') {
             wrapper.className = 'scribe-status-badge resolved';
-            wrapper.textContent = '✓ ' + block.content;
+            wrapper.textContent = ' ' + block.content;
             target = wrapper;
         } else if (block.type === 'winner') {
             wrapper.className = 'scribe-winner';
@@ -1402,31 +1327,26 @@ class ScribeCompositor {
             }
             nodeCache.cache.length = blocksArray.length;
         }
-
         for (let i = 0; i < blocksArray.length; i++) {
             const block = blocksArray[i];
             const currentBlockId = `${msgId}-${prefixId}-${i}`;
             let nodeObj = nodeCache.cache[i];
-
             let typeMismatch = nodeObj && nodeObj.wrapper && nodeObj.wrapper.dataset.blockType !== block.type;
             if (!typeMismatch && nodeObj && nodeObj.wrapper && ['code_block', 'artifact'].includes(block.type)) {
-                const lang = block.type === 'code_block' 
-                    ? (block.attributes || '').toLowerCase() 
+                const lang = block.type === 'code_block'
+                    ? (block.attributes || '').toLowerCase()
                     : (this._parseAttributes(block.attributes)['language'] || 'text').toLowerCase();
-                const barredFromAce = ['mermaid', 'markdown', 'md', 'text', 'txt', 'prose', 'math', 'latex', 'katex'];
                 const isSettled = block.type === 'code_block' ? (block.isLanguageSettled !== false) : true;
                 const lineCount = (block.content || '').split('\n').length;
                 
                 const isMathLang = ['math', 'latex', 'katex'].includes(lang);
                 const isInsideReasoningBox = containerElement && containerElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
-
-                const shouldBeAce = !isInsideReasoningBox && !isMathLang && isSettled && !barredFromAce.includes(lang) && (block.isComplete || lineCount >= 3);
+                const shouldBeAce = !isInsideReasoningBox && !isMathLang && isSettled && this._isSupportedCodeLanguage(lang) && (block.isComplete || lineCount >= 3);
                 const isCurrentlyAce = nodeObj.wrapper.dataset.aceInjected === "true";
                 if (shouldBeAce !== isCurrentlyAce || (['markdown', 'md'].includes(lang) && !nodeObj.wrapper.classList.contains('scribe-markdown-preview-block'))) {
                     typeMismatch = true;
                 }
             }
-
             if (nodeObj && nodeObj.wrapper && typeMismatch) {
                 nodeObj.wrapper.remove();
                 const editorId = nodeObj.wrapper.dataset.editorId;
@@ -1442,13 +1362,11 @@ class ScribeCompositor {
                 }
                 nodeObj = null;
             }
-
             if (!nodeObj) {
                 nodeObj = this._createBlockElement(block, msgId, currentBlockId, containerElement);
                 nodeObj.lastContentTrace = "";
                 nodeObj.lastRenderedCompletionState = null;
                 nodeObj.childrenCache = { cache: [] };
-
                 let nextNodeObj = nodeCache.cache.slice(i + 1).find(n => n && n.wrapper && n.wrapper.parentNode === containerElement);
                 if (nextNodeObj) {
                     containerElement.insertBefore(nodeObj.wrapper, nextNodeObj.wrapper);
@@ -1456,24 +1374,20 @@ class ScribeCompositor {
                     containerElement.appendChild(nodeObj.wrapper);
                 }
                 nodeCache.cache[i] = nodeObj;
-
                 if (['artifact', 'code_block'].includes(block.type) && nodeObj.wrapper.dataset.aceInjected === "true") {
                     const editorDiv = nodeObj.wrapper.querySelector('.scribe-ace-editor');
                     if (editorDiv) {
                         const lang = block.type === 'code_block' ? block.attributes : (this._parseAttributes(block.attributes)['language'] || 'text');
-                        this._mountAceEditor(nodeObj.wrapper, editorDiv, lang, block.content, block.isComplete); 
+                        this._mountAceEditor(nodeObj.wrapper, editorDiv, lang, block.content, block.isComplete);
                     }
                 }
             }
-
-            const needsRender = nodeObj.lastContentTrace !== block.content || 
-                                nodeObj.lastRenderedCompletionState !== block.isComplete || 
+            const needsRender = nodeObj.lastContentTrace !== block.content ||
+                                nodeObj.lastRenderedCompletionState !== block.isComplete ||
                                 block.type === 'math_block';
-
             if (needsRender) {
                 nodeObj.lastContentTrace = block.content;
                 nodeObj.lastRenderedCompletionState = block.isComplete;
-
                 if (block.type === 'text') {
                     this._renderMarkdownAndMath(nodeObj.target, block.content, registry, nodeObj);
                 } else if (nodeObj.wrapper.classList.contains('scribe-markdown-preview-block')) {
@@ -1515,14 +1429,13 @@ class ScribeCompositor {
                         const lang = block.type === 'code_block' ? block.attributes : (this._parseAttributes(block.attributes)['language'] || 'text');
                         const extOrLang = (lang && lang.indexOf('.') > -1) ? lang.split('.').pop() : lang;
                         const aceModePath = this._resolveAceMode(extOrLang);
-
                         if (editor.session.$modeId !== aceModePath) {
                             editor.session.setMode(aceModePath);
                             const langLabel = nodeObj.wrapper.querySelector('.ace-lang-label');
                             if (langLabel) {
                                 if (block.type === 'code_block') {
                                     langLabel.textContent = block.attributes.toUpperCase() || "CODE";
-                                } else {
+                               } else {
                                     const attrs = this._parseAttributes(block.attributes);
                                     langLabel.textContent = attrs['name'] || attrs['identifier'] || (attrs['language'] || 'text').toUpperCase();
                                 }
@@ -1542,13 +1455,11 @@ class ScribeCompositor {
                                 editor.session.setScrollTop(scrollPos);
                             }
                             editor.clearSelection();
-
                             if (!block.isComplete) {
                                 const totalRows = editor.session.getLength();
                                 editor.renderer.scrollToRow(totalRows);
                             }
                         }
-
                         if (block.isComplete && !editor.session.getUseWorker()) {
                             const activeModeName = aceModePath.split('/').pop();
                             const skippedWorkerModes = ['text', 'plain', 'abstract', 'none', 'markdown', 'mermaid'];
@@ -1564,11 +1475,9 @@ class ScribeCompositor {
                     }
                 }
             }
-
             if (block.children && block.children.length > 0) {
                 this._renderBlockTree(nodeObj.target, block.children, msgId, `${prefixId}-${i}`, registry, nodeObj.childrenCache);
             }
-
             if (nodeObj.wrapper.tagName === 'DETAILS') {
                 if (block.isComplete) {
                     if (!nodeObj.wrapper.hasAttribute('data-vis-sealed')) {
@@ -1597,11 +1506,10 @@ class ScribeCompositor {
     finalizeMessage(msgId) {
         const stream = this.activeStreams.get(msgId);
         if (!stream || stream.isFinalized) return;
-        stream.lastRenderTime = 0; 
+        stream.lastRenderTime = 0;
         this._renderBuffer(msgId);
         stream.isFinalized = true;
         this._forceStickyFollow = false;
-
         const finalizeCacheElements = (nodeCache) => {
             nodeCache.forEach(nodeObj => {
                 const editorId = nodeObj.wrapper.dataset.editorId;

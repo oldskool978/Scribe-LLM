@@ -144,7 +144,6 @@
     font-size: 1rem;
     line-height: 1.6;
     color: var(--text-primary);
-    text-align: left;
 }
 
 .node-content * {
@@ -176,7 +175,6 @@
     z-index: 10;
 }
 
-/* Enforces zero-bleed, anchored symmetry across active conversational runs */
 .input-orchestrator > .orchestrator-header,
 .input-orchestrator > .media-staging-tray,
 .input-orchestrator > .staging-tray,
@@ -211,6 +209,7 @@
     box-sizing: border-box;
     clear: both;
     line-height: normal;
+    color: inherit !important;
     contain: layout style;
 }
 
@@ -241,10 +240,22 @@
     font-style: normal !important;
     box-sizing: border-box;
     text-align: initial;
+    color: inherit !important;
 }
 
 .scribe-math-inline * {
     text-align: initial;
+}
+
+.scribe-math-block .katex, 
+.scribe-math-inline .katex {
+    color: inherit !important;
+}
+
+.scribe-math-block .katex-display, 
+.scribe-math-inline .katex-display {
+    color: inherit !important;
+    margin: 0;
 }
 
 .scribe-text-block {
@@ -253,7 +264,6 @@
     min-width: 0;
     box-sizing: border-box;
     contain: layout style;
-    text-align: left;
 }
 
 .scribe-text-block.scribe-code-native,
@@ -327,10 +337,19 @@
 }
 
 .scribe-ace-editor {
+    min-height: 80px;
+    height: auto;
     width: 100%;
-    box-sizing: border-box;
+    display: block;
     text-align: initial;
     direction: ltr;
+    box-sizing: border-box;
+}
+
+.scribe-markdown-preview-block {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
 }
 
 .scribe-artifact-native {
@@ -344,7 +363,6 @@
     font-family: var(--font-code, ui-monospace, monospace);
     box-sizing: border-box;
     contain: layout style;
-    text-align: left;
 }
 
 .scribe-thought-block {
@@ -388,7 +406,6 @@
     padding: 16px;
     font-size: 0.9em;
     color: var(--text-secondary, rgba(255, 255, 255, 0.7));
-    text-align: left;
 }
 
 .scribe-thought-block[data-block-type="think"] .thought-content {
@@ -466,5 +483,4 @@
     font-size: 0.9em;
     box-sizing: border-box;
     contain: layout style;
-    text-align: left;
 }
