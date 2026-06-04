@@ -349,6 +349,8 @@ class ScribeCompositor {
     }
 
     _lexicalStreamParse(streamContext, newText, isFinal = false) {
+        if (streamContext.isAtLineStart === undefined) streamContext.isAtLineStart = true;
+        
         let i = streamContext.cursorIndex;
         const len = newText.length;
         const isAssistantScope = streamContext.role === 'assistant';
@@ -356,6 +358,8 @@ class ScribeCompositor {
         let root = streamContext.astRoot || { type: 'root', children: [] };
         let stack = streamContext.parseStack || [root];
         let currentText = streamContext.textBuffer || "";
+
+        if (root.absoluteIndent === undefined) root.absoluteIndent = 0;
 
         const flushText = () => {
             if (currentText) {
@@ -372,6 +376,111 @@ class ScribeCompositor {
         };
 
         while (i < len) {
+            if (streamContext.isAtLineStart) {
+                let scanIdx = i;
+                let spacesFound = 0;
+                while (scanIdx < len && (newText[scanIdx] === ' ' || newText[scanIdx] === '\t')) {
+                    spacesFound++;
+                    scanIdx++;
+                }
+
+                if (scanIdx === len && !isFinal) {
+                    break;
+                }
+
+                const activeContext = stack[stack.length - 1];
+                const baselineNeeded = activeContext.absoluteIndent || 0;
+
+                if (spacesFound < baselineNeeded) {
+                    streamContext.isAtLineStart = false;
+                } else {
+                    let baselineIdx = i + baselineNeeded;
+                    let lookAheadIdx = baselineIdx;
+                    let localLeadingSpaces = 0;
+                    while (lookAheadIdx < len && (newText[lookAheadIdx] === ' ' || newText[lookAheadIdx] === '\t' || newText[lookAheadIdx] === '\r')) {
+                        if (newText[lookAheadIdx] !== '\r') localLeadingSpaces++;
+                        lookAheadIdx++;
+                    }
+
+                    let isStructuralTarget = false;
+                    let isPartialPrefix = false;
+
+                    if (lookAheadIdx < len) {
+                        const nextCh = newText[lookAheadIdx];
+                        const remainingFromScan = newText.substring(lookAheadIdx);
+
+                        if (activeContext && activeContext.type === 'code_block') {
+                            if (nextCh === '`') {
+                                let tCount = 0;
+                                while (lookAheadIdx + tCount < len && newText[lookAheadIdx + tCount] === '`') { tCount++; }
+                                if (lookAheadIdx + tCount === len) {
+                                    isPartialPrefix = true;
+                                } else if (tCount >= activeContext.fenceLength) {
+                                    let tailIdx = lookAheadIdx + tCount;
+                                    while (tailIdx < len && newText[tailIdx] !== '\n' && newText[tailIdx] !== '\r') { tailIdx++; }
+                                    if (tailIdx === len) {
+                                        isPartialPrefix = true;
+                                    } else if (newText.substring(lookAheadIdx + tCount, tailIdx).trim().length === 0) {
+                                        isStructuralTarget = true;
+                                    }
+                                }
+                            }
+                        } else {
+                            if (nextCh === '`') {
+                                let tCount = 0;
+                                while (lookAheadIdx + tCount < len && newText[lookAheadIdx + tCount] === '`') { tCount++; }
+                                if (lookAheadIdx + tCount === len) {
+                                    isPartialPrefix = true;
+                                } else if (tCount >= 3) {
+                                    isStructuralTarget = true;
+                                }
+                            } else if (nextCh === '<') {
+                                for (let t = 0; t < ScribeCompositor.TARGET_TAGS.length; t++) {
+                                    const tag = ScribeCompositor.TARGET_TAGS[t];
+                                    const openT = `<${tag}`;
+                                    const closeT = `</${tag}>`;
+                                    
+                                    if (openT.startsWith(remainingFromScan) && remainingFromScan.length < openT.length) {
+                                        isPartialPrefix = true;
+                                        break;
+                                    }
+                                    if (remainingFromScan.startsWith(openT)) {
+                                        const nextChar = remainingFromScan[openT.length];
+                                        if (nextChar === '>' || nextChar === ' ' || nextChar === '\t' || nextChar === '\n' || nextChar === '\r' || !nextChar) {
+                                            isStructuralTarget = true;
+                                            break;
+                                        }
+                                    }
+                                    if (closeT.startsWith(remainingFromScan) && remainingFromScan.length < closeT.length) {
+                                        isPartialPrefix = true;
+                                        break;
+                                    }
+                                    if (remainingFromScan.startsWith(closeT)) {
+                                        isStructuralTarget = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if (!isFinal) isPartialPrefix = true;
+                    }
+
+                    if (isPartialPrefix && !isFinal) {
+                        break;
+                    }
+
+                    if (isStructuralTarget) {
+                        i = lookAheadIdx;
+                        streamContext.currentActiveIndentDelta = localLeadingSpaces;
+                    } else {
+                        i = baselineIdx;
+                        streamContext.currentActiveIndentDelta = 0;
+                    }
+                    streamContext.isAtLineStart = false;
+                }
+            }
+
             const isEscapedToken = this._isEscaped(newText, i);
             
             if (!isFinal && !isEscapedToken && newText[i] === '`') {
@@ -407,6 +516,9 @@ class ScribeCompositor {
                 }
                 const triggeredTag = ScribeCompositor.TARGET_TAGS.find(tag => newText.startsWith(`</${tag}>`, i));
                 i += `</${triggeredTag}>`.length;
+                if (newText[i - 1] === '\n' || newText[i] === '\n') {
+                    streamContext.isAtLineStart = true;
+                }
                 streamContext.mathState = 'none';
                 streamContext.currentMathBuffer = "";
                 streamContext.inInlineCode = false;
@@ -422,6 +534,7 @@ class ScribeCompositor {
                         if (newText[i] === '\n') {
                             settled = true;
                             i++;
+                            streamContext.isAtLineStart = true;
                             break;
                         }
                         if (newText[i] !== '\r') {
@@ -438,7 +551,7 @@ class ScribeCompositor {
                 }
 
                 let tickCount = 0;
-                while (i + tickCount < len && newText[i + tickCount] === '`') {
+                while (i < len && newText[i + tickCount] === '`') {
                     tickCount++;
                 }
 
@@ -473,7 +586,10 @@ class ScribeCompositor {
                                 currentContext.isComplete = true;
                                 stack.pop();
                                 i = nextIdx;
-                                if (i < len && newText[i] === '\n') i++;
+                                if (i < len && newText[i] === '\n') {
+                                    i++;
+                                    streamContext.isAtLineStart = true;
+                                }
                                 continue;
                             }
                         } else if (lineTail.length > 0 && ['markdown', 'md'].includes((currentContext.attributes || '').toLowerCase())) {
@@ -491,6 +607,9 @@ class ScribeCompositor {
                     continue;
                 }
 
+                if (newText[i] === '\n') {
+                    streamContext.isAtLineStart = true;
+                }
                 currentText += newText[i];
                 i++;
                 continue;
@@ -571,6 +690,7 @@ class ScribeCompositor {
                                 langHint = langHint.trim();
                                 
                                 flushText();
+                                const parentIndent = currentContext.absoluteIndent || 0;
                                 let codeBlockNode = {
                                     type: 'code_block',
                                     content: '',
@@ -579,11 +699,13 @@ class ScribeCompositor {
                                     isComplete: false,
                                     isLanguageSettled: true,
                                     innerFencesCount: 0,
+                                    absoluteIndent: parentIndent + (streamContext.currentActiveIndentDelta || 0),
                                     children: []
                                 };
                                 currentContext.children.push(codeBlockNode);
                                 stack.push(codeBlockNode);
                                 i = nextIdx + 1;
+                                streamContext.isAtLineStart = true;
                                 continue;
                             } else {
                                 streamContext.inInlineCode = true;
@@ -636,16 +758,21 @@ class ScribeCompositor {
                         if (tagEndIndex !== -1) {
                             flushText();
                             const newAttr = newText.substring(attrStart, tagEndIndex).trim();
+                            const parentIndent = currentContext.absoluteIndent || 0;
                             let containerBlock = {
                                 type: matchedTag,
                                 content: '',
                                 attributes: newAttr,
                                 isComplete: false,
+                                absoluteIndent: parentIndent + (streamContext.currentActiveIndentDelta || 0),
                                 children: []
                             };
                             currentContext.children.push(containerBlock);
                             stack.push(containerBlock);
                             i = tagEndIndex + 1;
+                            if (newText[i - 1] === '\n') {
+                                streamContext.isAtLineStart = true;
+                            }
                             tagMatched = true; continue;
                         }
                     }
@@ -692,7 +819,11 @@ class ScribeCompositor {
                     }
                     else if (streamContext.mathState === 'inline_paren') {
                         if (this._checkDoubleNewlineBoundary(newText, i) && streamContext.braceDepth === 0) {
-                            currentText += '\\(' + streamContext.currentMathBuffer + '\n'; streamContext.mathState = 'none'; i++; continue;
+                            currentText += '\\(' + streamContext.currentMathBuffer + '\n';
+                            streamContext.mathState = 'none';
+                            i++;
+                            streamContext.isAtLineStart = true;
+                            continue;
                         }
                         if (newText.startsWith('\\)', i) && streamContext.braceDepth === 0) {
                             currentText += `SCRIBEMATHINLINEX${streamContext.mathRegistry.length}X`;
@@ -707,7 +838,11 @@ class ScribeCompositor {
                             streamContext.mathState = 'block_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue;
                         }
                         if (this._checkDoubleNewlineBoundary(newText, i) && streamContext.braceDepth === 0) {
-                            currentText += '$' + streamContext.currentMathBuffer + '\n'; streamContext.mathState = 'none'; i++; continue;
+                            currentText += '$' + streamContext.currentMathBuffer + '\n';
+                            streamContext.mathState = 'none';
+                            i++;
+                            streamContext.isAtLineStart = true;
+                            continue;
                         }
                         if (newText[i] === '$' && streamContext.braceDepth === 0) {
                             currentText += `SCRIBEMATHINLINEX${streamContext.mathRegistry.length}X`;
@@ -727,7 +862,12 @@ class ScribeCompositor {
                     }
                 }
             }
-            if (streamContext.mathState === 'none') currentText += newText[i];
+            if (streamContext.mathState === 'none') {
+                if (newText[i] === '\n') {
+                    streamContext.isAtLineStart = true;
+                }
+                currentText += newText[i];
+            }
             i++;
         }
 
