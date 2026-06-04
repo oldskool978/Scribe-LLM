@@ -31,20 +31,22 @@ def resolve_hardware_matrix():
             if re.search(r'(?i)AMD|Radeon|Ryzen', name):
                 has_amd = True
                 if re.search(r'(?i)R9700|R9\d00|AI\s*PRO\s*R|890M|880M|Strix|Ryzen\s*AI|RX\s*[89]\d{2,3}', name): amd_target_gfx = "gfx120X"
-                elif re.search(r'(?i)7900|W7900|7900M|7800|7700|W7800|W7700|7600', name): amd_target_gfx = "gfx1100"
+                elif re.search(r'(?i)7800|7700', name): amd_target_gfx = "gfx1101"
+                elif re.search(r'(?i)7600|W7600|W7500', name): amd_target_gfx = "gfx1102"
+                elif re.search(r'(?i)7900|W7900|7900M', name): amd_target_gfx = "gfx1100"
                 elif re.search(r'(?i)780M|760M|740M|Phoenix|Hawk', name): amd_target_gfx = "gfx1103"
+                elif re.search(r'(?i)680M|660M|Rembrandt', name): amd_target_gfx = "gfx1035"
                 elif re.search(r'(?i)6900|6800|6700|W6800', name): amd_target_gfx = "gfx1030"
+                elif re.search(r'(?i)MI325|MI350', name): amd_target_gfx = "gfx950"
                 elif re.search(r'(?i)MI300', name): amd_target_gfx = "gfx942"
                 elif re.search(r'(?i)MI250', name): amd_target_gfx = "gfx90a"
     else:
-        # Pure Linux Kernel Interrogation
         lspci = safe_subprocess(["lspci"])
         if lspci:
             if re.search(r'(?i)NVIDIA', lspci): has_nvidia = True
             if re.search(r'(?i)AMD|Radeon', lspci): has_amd = True
             if re.search(r'(?i)Intel.*(Arc|Graphics)', lspci): has_intel = True
         
-        # Fallback to sysfs DRM subkey inspection
         drm_path = Path("/sys/class/drm")
         if drm_path.exists():
             for uevent in drm_path.glob("card*/device/uevent"):
@@ -56,20 +58,34 @@ def resolve_hardware_matrix():
                 except Exception: pass
 
         if has_amd:
-            rocm_info = safe_subprocess(["rocminfo"])
-            gfx_match = re.search(r'gfx\d+', rocm_info)
-            if gfx_match:
-                amd_target_gfx = gfx_match.group(0)
+            if lspci and re.search(r'(?i)890M|880M', lspci):
+                amd_target_gfx = "gfx120X"
+            elif lspci and re.search(r'(?i)MI325|MI350', lspci):
+                amd_target_gfx = "gfx950"
+            elif lspci and re.search(r'(?i)7800|7700', lspci):
+                amd_target_gfx = "gfx1101"
+            elif lspci and re.search(r'(?i)7600|W7600|W7500', lspci):
+                amd_target_gfx = "gfx1102"
+            elif lspci and re.search(r'(?i)680M|660M|Rembrandt', lspci):
+                amd_target_gfx = "gfx1035"
+            else:
+                rocm_info = safe_subprocess(["rocminfo"])
+                gfx_match = re.search(r'gfx\d+', rocm_info)
+                if gfx_match:
+                    amd_target_gfx = gfx_match.group(0)
 
     if has_nvidia:
         smi = safe_subprocess(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"])
         if smi:
             try:
                 major = int(smi.split('.')[0])
-                if major >= 520: return "CUDA_12", ""
-                if major >= 450: return "CUDA_11", ""
+                if major >= 620: return "CUDA_13_2", ""
+                if major >= 600: return "CUDA_13_0", ""
+                if major >= 560: return "CUDA_12_6", ""
+                if major >= 520: return "CUDA_12_1", ""
+                if major >= 450: return "CUDA_11_8", ""
             except: pass
-        return "CUDA_12", "" 
+        return "CUDA_12_6", "" 
 
     if has_amd: return "ROCM", amd_target_gfx
     if has_intel: return "INTEL_XPU", ""
@@ -93,19 +109,22 @@ def hydrate_pytorch():
     
     try:
         if profile == "ROCM":
+            url_param = f"{llvm_target}-all"
+            index_url = f"https://rocm.nightlies.amd.com/v2-staging/{url_param}/"
             if os.name == 'nt':
-                url_param = f"{llvm_target}-all"
-                subprocess.check_call(pip_cmd + ["--index-url", f"https://rocm.nightlies.amd.com/v2-staging/{url_param}/", "--pre", "-U", "--no-build-isolation", "rocm[libraries,devel]"])
-                subprocess.check_call(pip_cmd + ["--index-url", f"https://rocm.nightlies.amd.com/v2-staging/{url_param}/", "--pre", "-U", "torch", "torchaudio", "torchvision"])
-            else:
-                # Upstream Linux ROCm Wheels are hosted natively on standard PyTorch indices
-                subprocess.check_call(pip_cmd + ["--index-url", "https://download.pytorch.org/whl/nightly/rocm7.2", "--pre", "-U", "torch", "torchvision", "torchaudio"])
+                subprocess.check_call(pip_cmd + ["--index-url", index_url, "--pre", "-U", "--no-build-isolation", "rocm[libraries,devel]"])
+            subprocess.check_call(pip_cmd + ["--index-url", index_url, "--pre", "-U", "torch", "torchvision", "torchaudio"])
         
-        elif profile == "CUDA_12":
-            subprocess.check_call(pip_cmd + ["--index-url", "https://download.pytorch.org/whl/cu121", "--pre", "-U", "torch", "torchvision", "torchaudio"])
-        
-        elif profile == "CUDA_11":
-            subprocess.check_call(pip_cmd + ["--index-url", "https://download.pytorch.org/whl/cu118", "--pre", "-U", "torch", "torchvision", "torchaudio"])
+        elif profile.startswith("CUDA_"):
+            cuda_urls = {
+                "CUDA_13_2": "https://download.pytorch.org/whl/nightly/cu132",
+                "CUDA_13_0": "https://download.pytorch.org/whl/nightly/cu130",
+                "CUDA_12_6": "https://download.pytorch.org/whl/nightly/cu126",
+                "CUDA_12_1": "https://download.pytorch.org/whl/cu121",
+                "CUDA_11_8": "https://download.pytorch.org/whl/cu118"
+            }
+            index_url = cuda_urls.get(profile, "https://download.pytorch.org/whl/nightly/cu126")
+            subprocess.check_call(pip_cmd + ["--index-url", index_url, "--pre", "-U", "torch", "torchvision", "torchaudio"])
         
         elif profile == "INTEL_XPU":
             subprocess.check_call(pip_cmd + ["--index-url", "https://pytorch-extension.intel.com/release-whl/stable/xpu/us/", "-U", "torch", "torchvision", "torchaudio", "intel-extension-for-pytorch"])
