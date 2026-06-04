@@ -539,40 +539,56 @@ class ScribeCompositor {
                 if (streamContext.mathState === 'none') {
                     if (!streamContext.inInlineCode) {
                         if (tickCount >= 3) {
-                            let nextIdx = i + tickCount;
-                            let hasNewline = false;
-                            while (nextIdx < len) {
-                                if (newText[nextIdx] === '\n') {
-                                    hasNewline = true;
+                            let isLineStart = true;
+                            let checkIdx = i - 1;
+                            while (checkIdx >= 0) {
+                                const ch = newText[checkIdx];
+                                if (ch === '\n') break;
+                                if (ch !== ' ' && ch !== '\t' && ch !== '\r') {
+                                    isLineStart = false;
                                     break;
                                 }
-                                nextIdx++;
+                                checkIdx--;
                             }
-                            if (!hasNewline) break;
-                            
-                            let langHint = '';
-                            let scanIdx = i + tickCount;
-                            while (scanIdx < nextIdx) {
-                                if (newText[scanIdx] !== '\r') langHint += newText[scanIdx];
-                                scanIdx++;
+                            if (isLineStart) {
+                                let nextIdx = i + tickCount;
+                                let hasNewline = false;
+                                while (nextIdx < len) {
+                                    if (newText[nextIdx] === '\n') {
+                                        hasNewline = true;
+                                        break;
+                                    }
+                                    nextIdx++;
+                                }
+                                if (!hasNewline) break;
+                                
+                                let langHint = '';
+                                let scanIdx = i + tickCount;
+                                while (scanIdx < nextIdx) {
+                                    if (newText[scanIdx] !== '\r') langHint += newText[scanIdx];
+                                    scanIdx++;
+                                }
+                                langHint = langHint.trim();
+                                
+                                flushText();
+                                let codeBlockNode = {
+                                    type: 'code_block',
+                                    content: '',
+                                    attributes: langHint,
+                                    fenceLength: tickCount,
+                                    isComplete: false,
+                                    isLanguageSettled: true,
+                                    innerFencesCount: 0,
+                                    children: []
+                                };
+                                currentContext.children.push(codeBlockNode);
+                                stack.push(codeBlockNode);
+                                i = nextIdx + 1;
+                                continue;
+                            } else {
+                                streamContext.inInlineCode = true;
+                                streamContext.activeInlineLength = tickCount;
                             }
-                            langHint = langHint.trim();
-                            
-                            flushText();
-                            let codeBlockNode = {
-                                type: 'code_block',
-                                content: '',
-                                attributes: langHint,
-                                fenceLength: tickCount,
-                                isComplete: false,
-                                isLanguageSettled: true,
-                                innerFencesCount: 0,
-                                children: []
-                            };
-                            currentContext.children.push(codeBlockNode);
-                            stack.push(codeBlockNode);
-                            i = nextIdx + 1;
-                            continue;
                         } else {
                             streamContext.inInlineCode = true;
                             streamContext.activeInlineLength = tickCount;
