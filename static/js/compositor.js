@@ -26,6 +26,10 @@ class ScribeCompositor {
         this.mathRenderCache = new Map();
         this.messageCount = 0;
         this._forceStickyFollow = false;
+        this._layoutCache = { gap: 32, paddingBottom: 0, isWarm: false };
+
+        this._boundResizeInvalidator = this._handleGlobalResize.bind(this);
+        window.addEventListener('resize', this._boundResizeInvalidator, { passive: true });
         
         this.editorObserver = new ResizeObserver((entries) => {
             window.requestAnimationFrame(() => {
@@ -50,6 +54,36 @@ class ScribeCompositor {
         this._configureMarkdown();
         this._setupOrchestratorObserver();
         this._setupManualScrollInterceptors();
+        this._setupDynamicExpansionListeners();
+    }
+
+    _handleGlobalResize() {
+        this._layoutCache.isWarm = false;
+    }
+
+    _setupDynamicExpansionListeners() {
+        if (!this.historyNode) return;
+        this.historyNode.addEventListener('toggle', (event) => {
+            if (event.target.tagName === 'DETAILS' && event.target.open) {
+                event.target.querySelectorAll('.scribe-ace-editor').forEach((editorEl) => {
+                    if (this.editorPool.has(editorEl.id)) {
+                        window.requestAnimationFrame(() => {
+                            const editor = this.editorPool.get(editorEl.id);
+                            editor.resize();
+                            editor.renderer.updateFull();
+                        });
+                    }
+                });
+            }
+        }, { capture: true, passive: true });
+    }
+
+    destroy() {
+        window.removeEventListener('resize', this._boundResizeInvalidator);
+        this.editorObserver.disconnect();
+        this.editorPool.forEach(editor => { try { editor.destroy(); } catch(e){} });
+        this.editorPool.clear();
+        this.observedNodes.clear();
     }
 
     _setupOrchestratorObserver() {
@@ -110,7 +144,6 @@ class ScribeCompositor {
                     `;
                 }
             };
-            
             if (typeof window.marked.use === 'function') {
                 window.marked.use({ gfm: true, breaks: true, renderer });
             } else if (typeof window.marked.setOptions === 'function') {
@@ -999,6 +1032,20 @@ class ScribeCompositor {
     }
 
     _renderMarkdownAndMath(targetElement, rawContent, registry, nodeObj) {
+        if (!targetElement) return;
+
+        const activeSelection = window.getSelection();
+        let selectionTracks = null;
+        if (activeSelection && activeSelection.rangeCount > 0 && targetElement.contains(activeSelection.anchorNode)) {
+            const currentRange = activeSelection.getRangeAt(0);
+            const trackingPreNode = document.createRange();
+            trackingPreNode.selectNodeContents(targetElement);
+            trackingPreNode.setEnd(currentRange.startContainer, currentRange.startOffset);
+            const startPos = trackingPreNode.toString().length;
+            selectionTracks = { start: startPos, end: startPos + currentRange.toString().length };
+        }
+
+        // 2. Core Markdown Token Parsing & XSS Sanitization Pass
         let htmlOut = window.marked ? window.marked.parse(rawContent) : rawContent;
         if (window.DOMPurify) {
             htmlOut = window.DOMPurify.sanitize(htmlOut, {
@@ -1008,40 +1055,97 @@ class ScribeCompositor {
             });
         }
         
+        // 3. Instantiate an Isolated DOM Subtree Element (Transient AST Container)
         const tempNode = document.createElement('div');
         tempNode.innerHTML = htmlOut;
+        
+        // 4. Resolve base64 Inclusions via Isolated Traversal
         tempNode.querySelectorAll('.static-markdown-nested').forEach((nestedWin) => {
             try {
-                const rawMarkdown = decodeURIComponent(atob(nestedWin.dataset.val));
-                nestedWin.innerHTML = window.marked ? window.marked.parse(rawMarkdown) : rawMarkdown;
-            } catch(e) {}
+                const b64Val = nestedWin.dataset.val;
+                if (b64Val) {
+                    const rawMarkdown = decodeURIComponent(atob(b64Val));
+                    nestedWin.innerHTML = window.marked ? window.marked.parse(rawMarkdown) : rawMarkdown;
+                }
+            } catch (e) {}
         });
+        
+        // 5. Discover and Convert Literal Tokens Natively via Text Node TreeWalker
         this._discoverAndConvertLiteralMath(tempNode);
-        const isInsideReasoningBox = targetElement && targetElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
+        
+        // 6. Calculate Scope Constraints for Dynamic Text Environments
+        const isInsideReasoningBox = targetElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
         const currentPromotedPool = [];
+        
         tempNode.querySelectorAll('.dynamic-markdown-code').forEach((wrapper, idx) => {
             if (!nodeObj || !nodeObj.isComplete || isInsideReasoningBox) return;
             const targetedLang = (wrapper.dataset.lang || 'text').toLowerCase();
             if (!this._isSupportedCodeLanguage(targetedLang)) return;
+            
             const stableEditorId = `${nodeObj.wrapper.id}-nested-markdown-${idx}`;
             const payload = wrapper.querySelector('.streaming-code-payload')?.textContent || '';
             const subContainer = document.createElement('div');
+            
             subContainer.className = 'scribe-ace-wrapper-placeholder';
             subContainer.dataset.editorId = stableEditorId;
             subContainer.dataset.lang = targetedLang;
             subContainer.dataset.val = btoa(encodeURIComponent(payload));
+            
             wrapper.parentNode.replaceChild(subContainer, wrapper);
             currentPromotedPool.push({ id: stableEditorId, lang: targetedLang, val: payload });
         });
-        targetElement.innerHTML = tempNode.innerHTML;
+        
+        // 7. ATOMIC DOM AST MIGRATION (Remaps Live Node Pointers Instantly)
+        targetElement.replaceChildren(...tempNode.childNodes);
+        
+        // 8. Restore Text Highlights Post-Migration Path
+        if (selectionTracks) {
+            try {
+                const restoreRange = document.createRange();
+                let currentAccumulator = 0;
+                let startFoundNode = null, startFoundOffset = 0;
+                let endFoundNode = null, endFoundOffset = 0;
+
+                const textNodeWalker = document.createTreeWalker(targetElement, NodeFilter.SHOW_TEXT, null, false);
+                let textNode;
+                while (textNode = textNodeWalker.nextNode()) {
+                    const nextLength = textNode.nodeValue.length;
+                    if (!startFoundNode && currentAccumulator + nextLength >= selectionTracks.start) {
+                        startFoundNode = textNode;
+                        startFoundOffset = selectionTracks.start - currentAccumulator;
+                    }
+                    if (!endFoundNode && currentAccumulator + nextLength >= selectionTracks.end) {
+                        endFoundNode = textNode;
+                        endFoundOffset = selectionTracks.end - currentAccumulator;
+                        break;
+                    }
+                    currentAccumulator += nextLength;
+                }
+                if (startFoundNode && endFoundNode) {
+                    restoreRange.setStart(startFoundNode, startFoundOffset);
+                    restoreRange.setEnd(endFoundNode, endFoundOffset);
+                    activeSelection.removeAllRanges();
+                    activeSelection.addRange(restoreRange);
+                }
+            } catch (restoreError) {}
+        }
+        
+        // 9. Inject Sequential Math Tokens Into Migrated Elements
+        if (registry && registry.length > 0) {
+            this._injectMathNodes(targetElement, registry);
+        }
+        
+        // 10. Mount Dynamic Interface Layers (Ace Code Components)
         targetElement.querySelectorAll('.scribe-ace-wrapper-placeholder').forEach((placeholder) => {
             const editorId = placeholder.dataset.editorId;
             const matchData = currentPromotedPool.find(item => item.id === editorId);
             if (!matchData) return;
+            
             const fullAceWrapper = document.createElement('div');
             fullAceWrapper.className = 'scribe-ace-wrapper';
             fullAceWrapper.dataset.aceInjected = "true";
             fullAceWrapper.dataset.editorId = editorId;
+            
             const barLayout = document.createElement('div');
             barLayout.className = 'ace-action-bar';
             barLayout.innerHTML = `
@@ -1052,9 +1156,11 @@ class ScribeCompositor {
             const textSpace = document.createElement('div');
             textSpace.id = editorId;
             textSpace.className = 'scribe-ace-editor';
+            
             fullAceWrapper.appendChild(barLayout);
             fullAceWrapper.appendChild(textSpace);
             placeholder.parentNode.replaceChild(fullAceWrapper, placeholder);
+            
             barLayout.querySelector('.ace-copy-btn').onclick = (e) => {
                 if (this.editorPool.has(editorId)) {
                     this._copyTextWithFeedback(this.editorPool.get(editorId).getValue(), e.target, 'Copy Code', 'Copied!');
@@ -1062,14 +1168,17 @@ class ScribeCompositor {
             };
             this._mountAceEditor(fullAceWrapper, textSpace, matchData.lang, matchData.val, true);
         });
-        if (registry && registry.length > 0) this._injectMathNodes(targetElement, registry);
+        
         if (window.katex) {
             targetElement.querySelectorAll('.scribe-math-inline, .scribe-math-block').forEach(el => {
                 if (el.closest('pre') || el.closest('code') || el.closest('.scribe-native-code-wrapper') || el.closest('.scribe-ace-wrapper')) return;
+                
                 const b64 = el.dataset.tex;
                 if (!b64) return;
+                
                 const isBlock = el.classList.contains('scribe-math-block');
                 const cacheKey = `${b64}-${isBlock ? 'block' : 'inline'}`;
+                
                 if (this.mathRenderCache.has(cacheKey)) {
                     el.innerHTML = this.mathRenderCache.get(cacheKey);
                 } else {
@@ -1077,15 +1186,59 @@ class ScribeCompositor {
                     try {
                         const decoded = atob(b64);
                         try { tex = decodeURIComponent(decoded); } catch(e) { tex = decoded; }
-                        tex = this._healKaTeX(tex);
                     } catch (decodeErr) { return; }
+                    
+                    tex = this._healKaTeX(tex);
+                    
                     try {
                         const container = document.createElement('span');
-                        window.katex.render(tex, container, { displayMode: isBlock, throwOnError: true });
-                        if (this.mathRenderCache.size >= 1000) this.mathRenderCache.delete(this.mathRenderCache.keys().next().value);
+                        window.katex.render(tex, container, { displayMode: isBlock, throwOnError: true, macros: {} });
+                        
+                        if (this.mathRenderCache.size >= 1000) {
+                            this.mathRenderCache.delete(this.mathRenderCache.keys().next().value);
+                        }
                         this.mathRenderCache.set(cacheKey, container.innerHTML);
                         el.innerHTML = container.innerHTML;
-                    } catch (err) { el.textContent = tex; }
+                        el.classList.remove('scribe-math-raw');
+                    } catch (err) {
+                        const lines = tex.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                        
+                        if (isBlock && lines.length > 1) {
+                            let combinedHtml = '';
+                            let successCount = 0;
+                            
+                            for (let line of lines) {
+                                let cleanLine = line.replace(/^(\$\$?|\\\[|\\\( counsel)/, '').replace(/(\$\$?|\\\]|\\\)) counsel$/, '').trim();
+                                if (!cleanLine) continue;
+                                
+                                const lineCacheKey = `${btoa(encodeURIComponent(cleanLine))}-block-split`;
+                                
+                                if (this.mathRenderCache.has(lineCacheKey)) {
+                                    combinedHtml += `<div class="scribe-math-block">${this.mathRenderCache.get(lineCacheKey)}</div>`;
+                                    successCount++;
+                                } else {
+                                    try {
+                                        const lineSpan = document.createElement('span');
+                                        window.katex.render(cleanLine, lineSpan, { displayMode: true, throwOnError: true, macros: {} });
+                                        this.mathRenderCache.set(lineCacheKey, lineSpan.innerHTML);
+                                        combinedHtml += `<div class="scribe-math-block">${lineSpan.innerHTML}</div>`;
+                                        successCount++;
+                                    } catch (lineErr) {
+                                        combinedHtml += `<div class="scribe-math-raw">${this._escapeHtml(line)}</div>`;
+                                    }
+                                }
+                            }
+                            
+                            if (successCount > 0) {
+                                el.innerHTML = combinedHtml;
+                                el.classList.remove('scribe-math-raw');
+                                return; 
+                            }
+                        }
+                        
+                        el.textContent = tex;
+                        el.classList.add('scribe-math-raw');
+                    }
                 }
             });
         }
@@ -1389,10 +1542,41 @@ class ScribeCompositor {
                     else {
                         const cleanTex = this._healKaTeX(block.content);
                         try {
-                            const spanNode = document.createElement('span'); window.katex.render(cleanTex, spanNode, { displayMode: true, throwOnError: true });
+                            const spanNode = document.createElement('span'); window.katex.render(cleanTex, spanNode, { displayMode: true, throwOnError: true, macros: {} });
                             this.mathRenderCache.set(cacheKey, spanNode.innerHTML); nodeObj.target.innerHTML = spanNode.innerHTML;
                             nodeObj.target.classList.remove('scribe-math-raw');
-                        } catch (err) { nodeObj.target.textContent = cleanTex; nodeObj.target.classList.add('scribe-math-raw'); }
+                        } catch (err) { 
+                            const lines = block.content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                            if (lines.length > 1) {
+                                let combinedHtml = '';
+                                let successCount = 0;
+                                for (let line of lines) {
+                                    let cleanLine = line.replace(/^(\$\$?|\\\[|\\\( counsel)/, '').replace(/(\$\$?|\\\]|\\\)) counsel$/, '').trim();
+                                    if (!cleanLine) continue;
+                                    const lineCacheKey = `${btoa(encodeURIComponent(cleanLine))}-block-split`;
+                                    if (this.mathRenderCache.has(lineCacheKey)) {
+                                        combinedHtml += `<div class="scribe-math-block">${this.mathRenderCache.get(lineCacheKey)}</div>`;
+                                        successCount++;
+                                    } else {
+                                        try {
+                                            const lineSpan = document.createElement('span');
+                                            window.katex.render(cleanLine, lineSpan, { displayMode: true, throwOnError: true, macros: {} });
+                                            this.mathRenderCache.set(lineCacheKey, lineSpan.innerHTML);
+                                            combinedHtml += `<div class="scribe-math-block">${lineSpan.innerHTML}</div>`;
+                                            successCount++;
+                                        } catch (lineErr) {
+                                            combinedHtml += `<div class="scribe-math-raw">${this._escapeHtml(line)}</div>`;
+                                        }
+                                    }
+                                }
+                                if (successCount > 0) {
+                                    nodeObj.target.innerHTML = combinedHtml;
+                                    nodeObj.target.classList.remove('scribe-math-raw');
+                                    return;
+                                }
+                            }
+                            nodeObj.target.textContent = cleanTex; nodeObj.target.classList.add('scribe-math-raw'); 
+                        }
                     }
                 } else if (block.type === 'winner') nodeObj.target.innerHTML = `<strong>Optimal Vector Selected:</strong> ${window.DOMPurify.sanitize(this._escapeHtml(block.content))}`;
                 else if (['artifact', 'code_block'].includes(block.type)) {
@@ -1510,8 +1694,20 @@ class ScribeCompositor {
         this.messageRegistry.delete(msgId);
     }
 
+    _warmLayoutCache() {
+        if (!this.historyNode) return;
+        const computedStyles = window.getComputedStyle(this.historyNode);
+        this._layoutCache = {
+            gap: parseInt(computedStyles.gap) || 0,
+            paddingBottom: parseInt(computedStyles.paddingBottom) || 0,
+            isWarm: true
+        };
+    }
+
     _isScrolledToBottom() {
-        const threshold = 120;
+        const orchestratorHeight = this.compositorNode ? this.compositorNode.offsetHeight : 180;
+        const threshold = orchestratorHeight + 20;
+        
         const totalScrollable = this.historyNode.scrollHeight - this.historyNode.clientHeight;
         return (totalScrollable - this.historyNode.scrollTop) <= threshold;
     }
@@ -1524,9 +1720,29 @@ class ScribeCompositor {
                 sentinel.id = 'scribe-scroll-sentinel';
                 this.historyNode.appendChild(sentinel);
             }
+
+            if (!this._layoutCache.isWarm) {
+                this._warmLayoutCache();
+            }
+
             const orchestratorHeight = this.compositorNode ? this.compositorNode.offsetHeight : 180;
-            sentinel.style.height = `${orchestratorHeight + 40}px`; sentinel.style.width = '100%'; sentinel.style.pointerEvents = 'none';
-            if (this.historyNode.lastChild !== sentinel) this.historyNode.appendChild(sentinel);
+            
+            const perfectHeight = orchestratorHeight - this._layoutCache.gap + this._layoutCache.paddingBottom;
+            const finalHeight = Math.max(0, perfectHeight - 8); 
+            const targetHeightStr = `${finalHeight}px`;
+
+            if (sentinel.style.height !== targetHeightStr) {
+                sentinel.style.height = targetHeightStr;
+                sentinel.style.minHeight = targetHeightStr; 
+                sentinel.style.flexShrink = '0'; 
+                sentinel.style.width = '100%'; 
+                sentinel.style.pointerEvents = 'none';
+            }
+
+            if (this.historyNode.lastChild !== sentinel) {
+                this.historyNode.appendChild(sentinel);
+            }
+            
             this.historyNode.scrollTop = this.historyNode.scrollHeight;
         }
     }

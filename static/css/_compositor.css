@@ -1,9 +1,180 @@
 /* Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md. */
 
+/* ==========================================================================
+   SCRIBE ENGINE GRAPHICAL COMPOSITOR SYSTEM - CORE SPECIFICATION
+   ========================================================================== */
+
 :root {
     --message-max-width: 920px;
+    --prose-readability-width: 80ch;
     --asset-width-default: 100%;
+    
+    --theme-blue-primary: #818cf8;
+    --radius-lg: 12px;
+    --radius-md: 8px;
+    --transition-snappy: 0.15s ease;
+    
+    --bg-base: #07070a;
+    --bg-surface: #101014;
+    --border-subtle: rgba(255, 255, 255, 0.05);
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.8);
+    --text-muted: rgba(255, 255, 255, 0.5);
+    --font-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
+
+/* ==========================================================================
+   1. CORE CONTAINER SCOPES
+   ========================================================================== */
+
+#chat-history {
+    position: relative;
+    flex: 1 1 auto;
+    width: var(--asset-width-default);
+    max-width: var(--asset-width-default);
+    min-height: 0;
+    overflow-y: scroll;
+    overflow-x: hidden;
+    padding: 40px 40px 0px 40px;
+    margin-bottom: 0 !important;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    scroll-behavior: auto;
+    box-sizing: border-box;
+    will-change: scroll-position;
+}
+
+.input-orchestrator {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: var(--asset-width-default);
+    max-width: none;
+    padding: 16px 24px 40px 24px;
+    background: var(--bg-base);
+    border-top: 1px solid var(--border-subtle);
+    box-sizing: border-box;
+    z-index: 10;
+}
+
+.input-orchestrator > .orchestrator-header,
+.input-orchestrator > .media-staging-tray,
+.input-orchestrator > .staging-tray,
+.input-orchestrator > .input-wrapper {
+    max-width: var(--message-max-width);
+    margin-left: auto;
+    margin-right: auto;
+    width: var(--asset-width-default);
+    box-sizing: border-box;
+}
+
+.orchestrator-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px 12px 12px;
+    width: var(--asset-width-default);
+    box-sizing: border-box;
+}
+
+/* ==========================================================================
+   2. MESSAGE NODE ARCHITECTURE & READABILITY FLOW
+   ========================================================================== */
+
+.message-node {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    max-width: var(--message-max-width);
+    margin: 0 auto;
+    width: var(--asset-width-default);
+    padding-bottom: 16px;               /* Deterministic floor spacer matching the layout cache */
+    box-sizing: border-box;
+    animation: slideUp 0.3s ease forwards;
+    contain: layout style;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.node-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-family: var(--font-code);
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5em;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.node-assistant .node-label { color: var(--theme-blue-primary); }
+.node-operator .node-label  { color: rgba(255, 255, 255, 0.7); }
+.node-user .node-label      { color: var(--text-secondary); }
+
+.node-content {
+    min-width: 0;
+    max-width: var(--asset-width-default);
+    width: var(--asset-width-default);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    box-sizing: border-box;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+}
+
+.node-content * {
+    box-sizing: border-box;
+}
+
+.node-content > :last-child {
+    margin-bottom: 0 !important;
+}
+
+.node-content > p,
+.node-content > ul,
+.node-content > ol,
+.scribe-text-block:not(.scribe-code-native):not(.scribe-artifact-native) {
+    max-width: var(--prose-readability-width);
+    width: var(--asset-width-default);
+}
+
+.node-user .node-content {
+    background-color: var(--bg-surface);
+    padding: 16px 20px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-subtle);
+    display: block;
+    align-self: stretch;
+    max-width: var(--message-max-width);
+}
+
+.node-visual-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    margin-bottom: 0.75em;
+}
+
+.context-thumbnail {
+    height: 160px;
+    width: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    object-fit: contain;
+    background-color: var(--bg-base);
+}
+
+/* ==========================================================================
+   3. NATIVE COMPONENTS & INTERFACE ELEMENTS
+   ========================================================================== */
 
 .welcome-banner {
     display: flex;
@@ -47,7 +218,7 @@
     padding: 0.4em 1em;
     border-radius: 20px;
     font-size: 0.8em;
-    font-family: var(--font-code, ui-monospace, monospace);
+    font-family: var(--font-code);
     font-weight: 600;
     margin: 0.75em 0;
     letter-spacing: 0.02em;
@@ -62,143 +233,225 @@
     font-style: italic;
 }
 
-#chat-history {
-    position: relative;
-    flex: 1 1 auto;
+/* ==========================================================================
+   4. DATA ENCLAVES & TECHNICAL INTERACTIVE LAYERS
+   ========================================================================== */
+
+.scribe-ace-wrapper,
+.scribe-native-code-wrapper,
+.scribe-artifact-native,
+.scribe-markdown-preview-block {
     width: var(--asset-width-default);
-    max-width: var(--asset-width-default);
-    min-height: 0;
-    overflow-y: scroll;
-    overflow-x: hidden;
-    padding: 40px;
-    padding-bottom: calc(var(--orchestrator-height, 180px) + 40px);
-    margin-bottom: 0 !important;
-    display: flex;
-    flex-direction: column;
-    gap: 32px;
-    scroll-behavior: auto;
-    box-sizing: border-box;
-    will-change: scroll-position;
+    max-width: var(--asset-width-default) !important;
 }
 
-.message-node {
+.scribe-ace-wrapper {
+    position: relative;
+    margin: 1.5em 0;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: #141414;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    min-width: 0;
-    max-width: var(--message-max-width);
-    margin: 0 auto;
-    width: var(--asset-width-default);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
     box-sizing: border-box;
-    animation: slideUp 0.3s ease forwards;
     contain: layout style;
 }
 
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+.ace-action-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    background-color: #1a1a1a;
+    border-bottom: 1px solid #2a2a2a;
 }
 
-.node-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5em;
-    font-family: var(--font-code, ui-monospace, monospace);
-    font-size: 0.85em;
+.ace-lang-label {
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.ace-copy-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.8);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: var(--font-ui, inherit);
+    transition: all var(--transition-snappy);
+}
+
+.ace-copy-btn:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.3);
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.ace-copy-btn.success {
+    color: #00ffa3;
+    border-color: #00ffa3;
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+.scribe-ace-editor {
+    min-height: 80px;
+    height: auto;
+    width: var(--asset-width-default);
+    display: block;
+    text-align: initial;
+    direction: ltr;
+    box-sizing: border-box;
+}
+
+.scribe-markdown-preview-block {
+    box-sizing: border-box;
+    text-align: left;
+}
+
+.scribe-artifact-native {
+    padding: 1.25em;
+    background: rgba(10, 10, 15, 0.6);
+    border: 1px solid rgba(0, 255, 163, 0.15);
+    border-radius: 8px;
+    margin: 1.25em 0;
+    overflow-x: auto;
+    font-family: var(--font-code);
+    box-sizing: border-box;
+    contain: layout style;
+}
+
+/* ==========================================================================
+   5. COGNITIVE REASONING MATRIX MODULES
+   ========================================================================== */
+
+.scribe-thought-block,
+.scribe-candidate-block,
+.scribe-evaluation {
+    margin: 1.2em 0;
+    overflow: hidden;
+    width: var(--asset-width-default);
+    max-width: var(--asset-width-default) !important; /* Bypasses the 80ch constraint to fill the window */
+    box-sizing: border-box;
+    contain: layout style;
+}
+
+.scribe-thought-block {
+    border: 1px solid var(--cog-active-border, #4f46e5);
+    border-radius: var(--radius-md);
+    background-color: var(--cog-active-bg, rgba(7, 7, 10, 0.85));
+    transition: all var(--transition-snappy);
+}
+
+.scribe-thought-block[data-block-type="think"] {
+    background: rgba(7, 7, 10, 0.85);
+    border-left: 3px solid var(--theme-blue-primary); /* Synchronized theme identity */
+    box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.6);
+}
+
+.thought-header,
+.candidate-header {
+    padding: 10px 16px;
+    background-color: rgba(0, 0, 0, 0.3);
+    font-family: var(--font-code);
+    font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: 0.5em;
-    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    user-select: none;
 }
 
-.node-assistant .node-label {
-    color: #818cf8;
+.thought-header { color: var(--cog-active-glow, #818cf8); border-bottom: 1px solid transparent; }
+.candidate-header { color: rgba(255, 255, 255, 0.5); background-color: rgba(0, 0, 0, 0.2); }
+
+.scribe-thought-block[open] .thought-header {
+    border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
-.node-operator .node-label {
+.thought-content {
+    padding: 16px;
+    font-size: 0.9em;
+    color: var(--text-secondary);
+    width: 100%;
+    box-sizing: border-box;
+    display: block; 
+}
+
+.scribe-thought-block[data-block-type="think"] .thought-content {
     color: rgba(255, 255, 255, 0.7);
+    font-style: italic;
 }
 
-.node-user .node-label { 
-    color: var(--text-secondary); 
+.thought-content .scribe-text-block,
+.thought-content p,
+.thought-content .markdown-body {
+    width: 100%;
+    max-width: var(--prose-readability-width) !important;
+    margin-left: 0;
+    margin-right: 0;
 }
 
-.node-visual-context {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5em;
-    margin-bottom: 0.75em;
+/* Virtual File System Execution sandboxes */
+.scribe-thought-block.rlm-exec-block {
+    background-color: rgba(5, 15, 10, 0.75);
+    border-color: #00ffa3;
+    border-left: 3px solid #00ffa3;
+    box-shadow: 0 0 16px rgba(0, 255, 163, 0.05);
 }
 
-.context-thumbnail {
-    height: 160px;
-    width: auto;
+.thought-header.rlm-header {
+    color: #00ffa3;
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+/* Virtual File System Telemetry Returns */
+.scribe-thought-block.rlm-result-block {
+    background-color: rgba(10, 10, 20, 0.75);
+    border-color: #00bfff;
+    border-left: 3px solid #00bfff;
+}
+
+.thought-header.rlm-result-header {
+    color: #00bfff;
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+.scribe-candidate-block {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 3px solid #4f46e5;
     border-radius: var(--radius-md);
-    border: 1px solid var(--border-subtle);
-    object-fit: contain;
-    background-color: var(--bg-base);
+    background-color: rgba(7, 7, 10, 0.4);
 }
 
-.node-content {
-    min-width: 0;
-    max-width: var(--asset-width-default);
-    width: var(--asset-width-default);
-    overflow-wrap: anywhere;
-    word-break: break-word;
+.scribe-evaluation {
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius-md);
+    background-color: rgba(255, 255, 255, 0.01);
+}
+
+.scribe-winner {
+    background: rgba(255, 199, 0, 0.08);
+    border: 1px dashed rgba(255, 199, 0, 0.3);
+    padding: 1em;
+    border-radius: 6px;
+    color: #ffc700;
+    margin: 1em 0;
+    font-family: var(--font-code);
+    font-size: 0.9em;
     box-sizing: border-box;
-    font-size: 1rem;
-    line-height: 1.6;
-    color: var(--text-primary);
+    contain: layout style;
 }
 
-.node-content * {
-    box-sizing: border-box;
-}
-
-.node-user .node-content {
-    background-color: var(--bg-surface);
-    padding: 16px 20px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-subtle);
-    display: block;
-    align-self: stretch;
-    max-width: var(--message-max-width);
-    width: var(--asset-width-default);
-}
-
-.input-orchestrator {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: var(--asset-width-default);
-    max-width: none;
-    padding: 16px 24px 40px 24px;
-    background: var(--bg-base);
-    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
-    box-sizing: border-box;
-    z-index: 10;
-}
-
-.input-orchestrator > .orchestrator-header,
-.input-orchestrator > .media-staging-tray,
-.input-orchestrator > .staging-tray,
-.input-orchestrator > .input-wrapper {
-    max-width: var(--message-max-width);
-    margin-left: auto;
-    margin-right: auto;
-    width: var(--asset-width-default);
-    box-sizing: border-box;
-}
-
-.orchestrator-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 12px 12px 12px;
-    width: var(--asset-width-default);
-    box-sizing: border-box;
-}
+/* ==========================================================================
+   6. MATHEMATICAL EXPRESSIONS (KATEX ENCLAVES)
+   ========================================================================== */
 
 .scribe-math-block,
 .scribe-math-block-display-override {
@@ -228,11 +481,6 @@
     height: 4px;
 }
 
-.scribe-math-block::-webkit-scrollbar-track,
-.scribe-math-block-display-override::-webkit-scrollbar-track {
-    background: transparent;
-}
-
 .scribe-math-block::-webkit-scrollbar-thumb,
 .scribe-math-block-display-override::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.1);
@@ -248,244 +496,6 @@
     color: inherit !important;
 }
 
-.scribe-math-inline * {
-    text-align: initial;
-}
-
-.scribe-math-block .katex, 
-.scribe-math-inline .katex {
-    color: inherit !important;
-}
-
-.scribe-math-block .katex-display, 
-.scribe-math-inline .katex-display {
-    color: inherit !important;
-    margin: 0;
-}
-
-.scribe-text-block {
-    width: var(--asset-width-default);
-    max-width: var(--asset-width-default);
-    min-width: 0;
-    box-sizing: border-box;
-    contain: layout style;
-}
-
-.scribe-text-block.scribe-code-native,
-.scribe-text-block.scribe-artifact-native {
-    max-width: var(--asset-width-default);
-}
-
-.scribe-math-raw {
-    font-family: var(--font-code, ui-monospace, monospace);
-    color: var(--text-muted);
-    opacity: 0.8;
-    white-space: pre-wrap;
-    box-sizing: border-box;
-    text-align: left;
-}
-
-.scribe-ace-wrapper {
-    position: relative;
-    width: var(--asset-width-default);
-    margin: 1.5em 0;
-    border-radius: var(--radius-md, 8px);
-    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-    background: #141414;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-    box-sizing: border-box;
-    contain: layout style;
-}
-
-.ace-action-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 16px;
-    background-color: #1a1a1a;
-    border-bottom: 1px solid #2a2a2a;
-}
-
-.ace-lang-label {
-    font-family: var(--font-code, ui-monospace, monospace);
-    font-size: 0.75rem;
-    color: var(--text-muted, rgba(255, 255, 255, 0.5));
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.ace-copy-btn {
-    background: transparent;
-    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
-    color: var(--text-secondary, rgba(255, 255, 255, 0.8));
-    border-radius: 4px;
-    font-size: 0.75rem;
-    padding: 4px 10px;
-    cursor: pointer;
-    font-family: var(--font-ui, inherit);
-    transition: all var(--transition-snappy, 0.15s ease);
-}
-
-.ace-copy-btn:hover {
-    color: var(--text-primary, #fff);
-    border-color: var(--text-secondary, rgba(255, 255, 255, 0.3));
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
-.ace-copy-btn.success {
-    color: var(--status-ready, #00ffa3);
-    border-color: var(--status-ready, #00ffa3);
-    background-color: rgba(16, 185, 129, 0.1);
-}
-
-.scribe-ace-editor {
-    min-height: 80px;
-    height: auto;
-    width: var(--asset-width-default);
-    display: block;
-    text-align: initial;
-    direction: ltr;
-    box-sizing: border-box;
-}
-
-.scribe-markdown-preview-block {
-    width: var(--asset-width-default);
-    box-sizing: border-box;
-    text-align: left;
-}
-
-.scribe-artifact-native {
-    width: var(--asset-width-default);
-    padding: 1.25em;
-    background: rgba(10, 10, 15, 0.6);
-    border: 1px solid rgba(0, 255, 163, 0.15);
-    border-radius: 8px;
-    margin: 1.25em 0;
-    overflow-x: auto;
-    font-family: var(--font-code, ui-monospace, monospace);
-    box-sizing: border-box;
-    contain: layout style;
-}
-
-.scribe-thought-block {
-    margin: 1.2em 0;
-    border: 1px solid var(--cog-active-border, #4f46e5);
-    border-radius: var(--radius-md, 4px);
-    background-color: var(--cog-active-bg, rgba(7, 7, 10, 0.85));
-    overflow: hidden;
-    transition: all var(--transition-snappy, 0.15s ease);
-    width: var(--asset-width-default);
-    box-sizing: border-box;
-    contain: layout style;
-}
-
-.scribe-thought-block[data-block-type="think"] {
-    background: rgba(7, 7, 10, 0.85);
-    border-left: 3px solid #4f46e5;
-    border-radius: 4px;
-    box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.6);
-}
-
-.thought-header {
-    padding: 10px 16px;
-    background-color: rgba(0, 0, 0, 0.3);
-    font-family: var(--font-code, ui-monospace, monospace);
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--cog-active-glow, #818cf8);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    cursor: pointer;
-    user-select: none;
-    border-bottom: 1px solid transparent;
-}
-
-.scribe-thought-block[open] .thought-header {
-    border-bottom-color: rgba(255, 255, 255, 0.05);
-}
-
-.thought-content {
-    padding: 16px;
-    font-size: 0.9em;
-    color: var(--text-secondary, rgba(255, 255, 255, 0.7));
-}
-
-.scribe-thought-block[data-block-type="think"] .thought-content {
-    color: rgba(255, 255, 255, 0.7);
-    font-style: italic;
-}
-
-.scribe-thought-block.rlm-exec-block {
-    background-color: var(--rlm-exec-bg, rgba(5, 15, 10, 0.75));
-    border-color: var(--rlm-exec-border, #00ffa3);
-    border-left: 3px solid #00ffa3;
-    box-shadow: 0 0 16px rgba(0, 255, 163, 0.05);
-}
-
-.thought-header.rlm-header {
-    color: var(--rlm-exec-border, #00ffa3);
-    background-color: rgba(0, 0, 0, 0.4);
-}
-
-.scribe-thought-block.rlm-result-block {
-    background-color: var(--rlm-result-bg, rgba(10, 10, 20, 0.75));
-    border-color: var(--rlm-result-border, #00bfff);
-    border-left: 3px solid #00bfff;
-}
-
-.thought-header.rlm-result-header {
-    color: var(--rlm-result-border, #00bfff);
-    background-color: rgba(0, 0, 0, 0.4);
-}
-
-.scribe-candidate-block {
-    margin: 1.2em 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-left: 3px solid #4f46e5;
-    border-radius: var(--radius-md, 4px);
-    background-color: rgba(7, 7, 10, 0.4);
-    overflow: hidden;
-    width: var(--asset-width-default);
-    box-sizing: border-box;
-    contain: layout style;
-}
-
-.candidate-header {
-    padding: 10px 16px;
-    background-color: rgba(0, 0, 0, 0.2);
-    font-family: var(--font-code, ui-monospace, monospace);
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    cursor: pointer;
-    user-select: none;
-}
-
-.scribe-evaluation {
-    margin: 1.2em 0;
-    border: 1px dashed rgba(255, 255, 255, 0.15);
-    border-radius: var(--radius-md, 4px);
-    background-color: rgba(255, 255, 255, 0.01);
-    overflow: hidden;
-    width: var(--asset-width-default);
-    box-sizing: border-box;
-    contain: layout style;
-}
-
-.scribe-winner {
-    background: rgba(255, 199, 0, 0.08);
-    border: 1px dashed rgba(255, 199, 0, 0.3);
-    padding: 1em;
-    border-radius: 6px;
-    color: #ffc700;
-    margin: 1em 0;
-    font-family: var(--font-code, ui-monospace, monospace);
-    font-size: 0.9em;
-    box-sizing: border-box;
-    contain: layout style;
-}
+.scribe-math-inline * { text-align: initial; }
+.scribe-math-block .katex, .scribe-math-inline .katex { color: inherit !important; }
+.scribe-math-block .katex-display, .scribe-math-inline .katex-display { color: inherit !important; margin: 0; }
