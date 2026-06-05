@@ -9,6 +9,7 @@ import threading
 import subprocess
 import requests
 import struct
+import re
 import argparse
 import queue
 import shutil
@@ -44,6 +45,7 @@ PROXY_SESSION.mount('https://', _adapter)
 
 _LOCKED_TOPOLOGY = None 
 _HERMETIC_HIP_PATH = None
+_CACHED_AMD_STATIC = None
 
 def find_hermetic_hipinfo() -> Optional[str]:
     global _HERMETIC_HIP_PATH
@@ -51,7 +53,7 @@ def find_hermetic_hipinfo() -> Optional[str]:
         return _HERMETIC_HIP_PATH
     
     search_roots = [os.path.join(BASE_DIR, ".venv"), os.path.join(BASE_DIR, "venv"), BASE_DIR]
-    names = ["hipInfo.exe", "hipinfo.exe", "hipInfo", "hipinfo"] if os.name == 'nt' else ["hipinfo", "hipInfo"]
+    names = ["hipInfo.exe", "hipinfo.exe", "hipInfo", "hipinfo"] if os.name == 'nt' else ["rocminfo"]
     
     for root in search_roots:
         site_pkgs = os.path.join(root, "Lib", "site-packages")
@@ -94,28 +96,91 @@ def query_nvidia_cuda(kwargs) -> Optional[dict]:
     return None
 
 def query_amd_hip(kwargs) -> Optional[dict]:
+    global _CACHED_AMD_STATIC, _LOCKED_TOPOLOGY
+    
     hip_path = find_hermetic_hipinfo()
     if not hip_path:
         return None
+        
+    if os.name == 'nt':
+        try:
+            res = subprocess.run([hip_path], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
+            if res.stdout:
+                total_mb, free_mb, device_names = 0.0, 0.0, []
+                current_name = "AMD HIP Device"
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if ":" in line:
+                        key, val = [s.strip() for s in line.split(":", 1)]
+                        if key == "Name": current_name = val
+                        elif key == "gcnArchName": device_names.append(f"{current_name} [{val}]")
+                        elif key == "memInfo.total": total_mb += float(val.split()[0]) * (1024.0 if "GB" in val else 1.0)
+                        elif key == "memInfo.free": free_mb += float(val.split()[0]) * (1024.0 if "GB" in val else 1.0)
+                if total_mb > 0:
+                    unique_names = list(set(device_names)) or [current_name]
+                    gpu_type = f"{len(device_names)}x {unique_names[0]}" if len(device_names) > 1 and len(unique_names) == 1 else " + ".join(unique_names)
+                    return {"type": gpu_type, "vram_total": total_mb, "vram_free": free_mb}
+        except Exception: pass
+        return None
+
+    if _CACHED_AMD_STATIC is None:
+        gpu_type = "AMD ROCm Accelerated SoC"
+        try:
+            res = subprocess.run([hip_path], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
+            if res.stdout:
+                gpu_agents = []
+                current_agent = None
+                
+                for line in res.stdout.splitlines():
+                    stripped = line.strip()
+                    if re.match(r'^Agent\s+\d+', stripped) or (stripped.startswith('Agent') and len(stripped.split()) == 2):
+                        if current_agent and current_agent.get("Device Type") == "GPU":
+                            gpu_agents.append(current_agent)
+                        current_agent = {}
+                        continue
+                    
+                    if current_agent is None:
+                        continue
+                        
+                    if ":" in line:
+                        key, val = [s.strip() for s in line.split(":", 1)]
+                        if key in ["Name", "Marketing Name", "Device Type", "gcnArchName"]:
+                            current_agent[key] = val
+                            
+                if current_agent and current_agent.get("Device Type") == "GPU":
+                    gpu_agents.append(current_agent)
+                    
+                if gpu_agents:
+                    agent = gpu_agents[0]
+                    name = agent.get("Marketing Name") or agent.get("Name") or "AMD ROCm Device"
+                    arch = agent.get("gcnArchName")
+                    gpu_type = f"{name} [{arch}]" if arch else name
+        except Exception:
+            pass
+            
+        _CACHED_AMD_STATIC = {"type": gpu_type}
+        _LOCKED_TOPOLOGY = "AMD_HIP"
+
     try:
-        res = subprocess.run([hip_path], timeout=3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, **kwargs)
-        if res.stdout:
-            total_mb, free_mb, device_names = 0.0, 0.0, []
-            current_name = "AMD HIP Device"
-            for line in res.stdout.splitlines():
-                line = line.strip()
-                if ":" in line:
-                    key, val = [s.strip() for s in line.split(":", 1)]
-                    if key == "Name": current_name = val
-                    elif key == "gcnArchName": device_names.append(f"{current_name} [{val}]")
-                    elif key == "memInfo.total": total_mb += float(val.split()[0]) * (1024.0 if "GB" in val else 1.0)
-                    elif key == "memInfo.free": free_mb += float(val.split()[0]) * (1024.0 if "GB" in val else 1.0)
-            if total_mb > 0:
-                unique_names = list(set(device_names)) or [current_name]
-                gpu_type = f"{len(device_names)}x {unique_names[0]}" if len(device_names) > 1 and len(unique_names) == 1 else " + ".join(unique_names)
-                return {"type": gpu_type, "vram_total": total_mb, "vram_free": free_mb}
-    except Exception: pass
-    return None
+        m_total, m_avail = 0.0, 0.0
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    m_total = float(line.split()[1]) / 1024.0
+                elif line.startswith("MemAvailable:"):
+                    m_avail = float(line.split()[1]) / 1024.0
+                    break
+                    
+        if m_total > 0.0:
+            return {
+                "type": _CACHED_AMD_STATIC["type"],
+                "vram_total": round(m_total, 2),
+                "vram_free": round(m_avail, 2)
+            }
+    except Exception: 
+        pass
+
+    return {"type": _CACHED_AMD_STATIC["type"], "vram_total": 0.0, "vram_free": 0.0}
 
 def query_intel_xpu(kwargs) -> Optional[dict]:
     try:
@@ -228,38 +293,46 @@ class SystemProfiler:
             if gpu_data:
                 telemetry.update(gpu_data)
         else:
-            gpu_data = query_nvidia_cuda(kwargs)
-            if gpu_data:
-                _LOCKED_TOPOLOGY = "NVIDIA_CUDA"
-                telemetry.update(gpu_data)
-                ui_log = "NVIDIA CUDA"
-            else:
+            ui_log = "CPU Native"
+            if os.name != 'nt' and find_hermetic_hipinfo():
                 gpu_data = query_amd_hip(kwargs)
                 if gpu_data:
                     _LOCKED_TOPOLOGY = "AMD_HIP"
                     telemetry.update(gpu_data)
                     ui_log = "AMD HIP"
+            else:
+                gpu_data = query_nvidia_cuda(kwargs)
+                if gpu_data:
+                    _LOCKED_TOPOLOGY = "NVIDIA_CUDA"
+                    telemetry.update(gpu_data)
+                    ui_log = "NVIDIA CUDA"
                 else:
-                    gpu_data = query_intel_xpu(kwargs)
+                    gpu_data = query_amd_hip(kwargs)
                     if gpu_data:
-                        _LOCKED_TOPOLOGY = "INTEL_XPU"
+                        _LOCKED_TOPOLOGY = "AMD_HIP"
                         telemetry.update(gpu_data)
-                        ui_log = "Intel XPU"
+                        ui_log = "AMD HIP"
                     else:
-                        gpu_data = query_apple_metal()
+                        gpu_data = query_intel_xpu(kwargs)
                         if gpu_data:
-                            _LOCKED_TOPOLOGY = "APPLE_METAL"
+                            _LOCKED_TOPOLOGY = "INTEL_XPU"
                             telemetry.update(gpu_data)
-                            ui_log = "Apple Metal"
+                            ui_log = "Intel XPU"
                         else:
-                            _LOCKED_TOPOLOGY = "CPU_NATIVE"
-                            ui_log = "CPU Native"
-                            
+                            gpu_data = query_apple_metal()
+                            if gpu_data:
+                                _LOCKED_TOPOLOGY = "APPLE_METAL"
+                                telemetry.update(gpu_data)
+                                ui_log = "Apple Metal"
+                            else:
+                                _LOCKED_TOPOLOGY = "CPU_NATIVE"
+                                ui_log = "CPU Native"
+                                
             sys.stdout.write(f"\033[95m[TOPOLOGY] Compute Graph Locked to: {ui_log}\033[0m\n")
 
         with cls._lock:
             cls._cache = telemetry
-
+            
 GGUF_META_CACHE = {}
 
 def get_gguf_metadata(filepath: str) -> dict:
