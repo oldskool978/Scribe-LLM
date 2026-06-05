@@ -127,14 +127,21 @@ class ScribeCompositor {
             const self = this;
             const renderer = {
                 code(code, infostring) {
-                    const lang = (infostring || '').toLowerCase();
+                    let cleanLang = (infostring || '').trim();
+                    const firstSpace = cleanLang.search(/\s/);
+                    if (firstSpace !== -1) {
+                        cleanLang = cleanLang.substring(0, firstSpace);
+                    }
+                    const lang = cleanLang.toLowerCase();
                     if (['markdown', 'md'].includes(lang)) {
                         return `<div class="scribe-markdown-preview-block markdown-body static-markdown-nested" data-val="${btoa(encodeURIComponent(code))}"></div>`;
                     }
                     return `
                         <div class="scribe-native-code-wrapper dynamic-markdown-code" data-lang="${lang}">
                             <div class="ace-action-bar micro-action-bar">
-                                <span class="ace-lang-label">${(lang || 'CODE').toUpperCase()}</span>
+                                <div class="ace-meta-container">
+                                    <span class="ace-lang-label">${(lang || 'CODE').toUpperCase()}</span>
+                                </div>
                                 <button class="action-btn ace-copy-btn" onclick="Compositor._handleInlineCopy(this)">Copy</button>
                             </div>
                             <div class="scribe-text-block scribe-code-native">
@@ -188,11 +195,7 @@ class ScribeCompositor {
 
     _isSupportedCodeLanguage(langHint) {
         if (!langHint) return false;
-        let cleanHint = "";
-        for (let i = 0; i < langHint.length; i++) {
-            const code = langHint.charCodeAt(i);
-            if (code > 32) cleanHint += langHint[i].toLowerCase();
-        }
+        let cleanHint = langHint.trim().toLowerCase();
         if (ScribeCompositor.BARRED_FROM_ACE.has(cleanHint)) return false;
         
         const targetLang = ScribeCompositor.AI_QUIRKS[cleanHint] || cleanHint;
@@ -213,11 +216,7 @@ class ScribeCompositor {
 
     _resolveAceMode(langHint) {
         if (!langHint) return "ace/mode/text";
-        let cleanHint = "";
-        for (let i = 0; i < langHint.length; i++) {
-            const code = langHint.charCodeAt(i);
-            if (code > 32) cleanHint += langHint[i].toLowerCase();
-        }
+        let cleanHint = langHint.trim().toLowerCase();
         
         const targetLang = ScribeCompositor.AI_QUIRKS[cleanHint] || cleanHint;
         if (window.ace && window.ace.require) {
@@ -249,6 +248,9 @@ class ScribeCompositor {
 
     _healKaTeX(tex) {
         if (!tex) return tex;
+        
+        tex = tex.replace(/\\b(?![a-zA-Z])/g, '\\mathbf');
+        
         let result = '';
         const len = tex.length;
         let i = 0;
@@ -401,6 +403,7 @@ class ScribeCompositor {
                     type: 'text',
                     content: currentText,
                     attributes: '',
+                    metaAttributes: '',
                     isComplete: true,
                     children: []
                 });
@@ -518,9 +521,7 @@ class ScribeCompositor {
             
             if (!isFinal && !isEscapedToken && newText[i] === '`') {
                 let tCount = 0;
-                while (i + tCount < len && newText[i + tCount] === '`') {
-                    tCount++;
-                }
+                while (i + tCount < len && newText[i + tCount] === '`') { tCount++; }
                 if (i + tCount === len) break;
             }
 
@@ -560,51 +561,58 @@ class ScribeCompositor {
             }
 
             const currentContext = stack[stack.length - 1];
+            
             if (currentContext.type === 'code_block') {
                 if (!currentContext.isLanguageSettled) {
                     let settled = false;
                     while (i < len) {
                         if (newText[i] === '\n') {
                             settled = true;
-                            i++;
-                            streamContext.isAtLineStart = true;
                             break;
                         }
                         if (newText[i] !== '\r') {
-                            currentContext.attributes += newText[i];
+                            currentContext.rawLineTail = (currentContext.rawLineTail || "") + newText[i];
                         }
                         i++;
                     }
-                    currentContext.attributes = currentContext.attributes.trim();
-                    if (settled) {
+                    const trimmedTail = (currentContext.rawLineTail || "").trim();
+                    const firstSpace = trimmedTail.search(/\s/);
+                    if (firstSpace !== -1) {
+                        currentContext.attributes = trimmedTail.substring(0, firstSpace).trim();
+                        currentContext.metaAttributes = trimmedTail.substring(firstSpace).trim();
+                    } else {
+                        currentContext.attributes = trimmedTail;
+                        currentContext.metaAttributes = "";
+                    }
+                    if (settled || isFinal) {
                         currentContext.isLanguageSettled = true;
                         currentContext.innerFencesCount = 0;
+                        if (i < len && newText[i] === '\n') {
+                            i++;
+                            streamContext.isAtLineStart = true;
+                        } else {
+                            streamContext.isAtLineStart = false;
+                        }
                     }
                     continue;
                 }
 
                 let tickCount = 0;
-                while (i < len && newText[i + tickCount] === '`') {
-                    tickCount++;
-                }
+                while (i + tickCount < len && newText[i + tickCount] === '`') { tickCount++; }
 
-                if (tickCount > 0) {
+                if (tickCount > 0 && !isEscapedToken) {
                     let isLineStart = false;
                     if (i === 0 || newText[i - 1] === '\n') {
                         isLineStart = true;
                     } else {
                         let checkIdx = i - 1;
-                        while (checkIdx >= 0 && (newText[checkIdx] === ' ' || newText[checkIdx] === '\t')) {
-                            checkIdx--;
-                        }
+                        while (checkIdx >= 0 && (newText[checkIdx] === ' ' || newText[checkIdx] === '\t')) { checkIdx--; }
                         if (checkIdx < 0 || newText[checkIdx] === '\n') isLineStart = true;
                     }
 
-                    if (isLineStart && !isEscapedToken) {
+                    if (isLineStart) {
                         let nextIdx = i + tickCount;
-                        while (nextIdx < len && newText[nextIdx] !== '\n' && newText[nextIdx] !== '\r') {
-                            nextIdx++;
-                        }
+                        while (nextIdx < len && newText[nextIdx] !== '\n' && newText[nextIdx] !== '\r') { nextIdx++; }
                         let lineTail = newText.substring(i + tickCount, nextIdx).trim();
 
                         if (tickCount >= currentContext.fenceLength && lineTail.length === 0) {
@@ -626,7 +634,6 @@ class ScribeCompositor {
                                 continue;
                             }
                         } else if (lineTail.length > 0 && ['markdown', 'md'].includes((currentContext.attributes || '').toLowerCase())) {
-                            if (nextIdx === len && !isFinal) break;
                             if (!currentContext.innerFencesCount) currentContext.innerFencesCount = 0;
                             currentContext.innerFencesCount++;
                             currentText += newText.substring(i, nextIdx);
@@ -634,7 +641,7 @@ class ScribeCompositor {
                             continue;
                         }
                     }
-
+                    
                     currentText += newText.substring(i, i + tickCount);
                     i += tickCount;
                     continue;
@@ -683,9 +690,7 @@ class ScribeCompositor {
             }
 
             let tickCount = 0;
-            while (i + tickCount < len && newText[i + tickCount] === '`') {
-                tickCount++;
-            }
+            while (i + tickCount < len && newText[i + tickCount] === '`') { tickCount++; }
 
             if (tickCount > 0 && !isEscapedToken) {
                 if (streamContext.mathState === 'none') {
@@ -702,44 +707,83 @@ class ScribeCompositor {
                                 }
                                 checkIdx--;
                             }
+
                             if (isLineStart) {
                                 let nextIdx = i + tickCount;
-                                let hasNewline = false;
-                                while (nextIdx < len) {
-                                    if (newText[nextIdx] === '\n') {
-                                        hasNewline = true;
-                                        break;
+                                while (nextIdx < len && newText[nextIdx] !== '\n' && newText[nextIdx] !== '\r') { nextIdx++; }
+                                let lineTail = newText.substring(i + tickCount, nextIdx).trim();
+                                
+                                let isProseSentence = false;
+                                let wordCount = 0;
+                                let hasMarkdownSymbols = false;
+
+                                for (let k = 0; k < lineTail.length; k++) {
+                                    const ch = lineTail[k];
+                                    if (ch === ' ' || ch === '\t') {
+                                        if (k > 0 && lineTail[k-1] !== ' ' && lineTail[k-1] !== '\t') {
+                                            wordCount++;
+                                        }
                                     }
-                                    nextIdx++;
+                                    if (ch === '*' || ch === '_' || ch === '(' || ch === ')' || ch === '[' || ch === ']') {
+                                        hasMarkdownSymbols = true;
+                                    }
                                 }
-                                if (!hasNewline) break;
-                                
-                                let langHint = '';
-                                let scanIdx = i + tickCount;
-                                while (scanIdx < nextIdx) {
-                                    if (newText[scanIdx] !== '\r') langHint += newText[scanIdx];
-                                    scanIdx++;
+                                if (lineTail.length > 0 && !lineTail.includes(' ') && !lineTail.includes('\t')) {
+                                    wordCount = 1;
                                 }
-                                langHint = langHint.trim();
-                                
-                                flushText();
-                                const parentIndent = currentContext.absoluteIndent || 0;
-                                let codeBlockNode = {
-                                    type: 'code_block',
-                                    content: '',
-                                    attributes: langHint,
-                                    fenceLength: tickCount,
-                                    isComplete: false,
-                                    isLanguageSettled: true,
-                                    innerFencesCount: 0,
-                                    absoluteIndent: parentIndent + (streamContext.currentActiveIndentDelta || 0),
-                                    children: []
-                                };
-                                currentContext.children.push(codeBlockNode);
-                                stack.push(codeBlockNode);
-                                i = nextIdx + 1;
-                                streamContext.isAtLineStart = true;
-                                continue;
+
+                                if (wordCount > 1 || hasMarkdownSymbols) {
+                                    isProseSentence = true;
+                                }
+
+                                if ((!isLineStart && !isProseSentence) || currentText.endsWith('\n')) {
+                                    if (currentText.endsWith('\n')) {
+                                        currentText = currentText.slice(0, -1);
+                                    }
+                                    isLineStart = true;
+                                }
+
+                                if (isLineStart) {
+                                    flushText();
+                                    const parentIndent = currentContext.absoluteIndent || 0;
+                                    
+                                    let cleanLang = "";
+                                    let metaAttrs = "";
+                                    const firstSpace = lineTail.search(/\s/);
+                                    if (firstSpace !== -1) {
+                                        cleanLang = lineTail.substring(0, firstSpace).trim();
+                                        metaAttrs = lineTail.substring(firstSpace).trim();
+                                    } else {
+                                        cleanLang = lineTail;
+                                        metaAttrs = "";
+                                    }
+
+                                    let settled = (nextIdx < len && (newText[nextIdx] === '\n' || newText[nextIdx] === '\r')) || isFinal;
+
+                                    let codeBlockNode = {
+                                        type: 'code_block',
+                                        content: '',
+                                        attributes: cleanLang,
+                                        metaAttributes: metaAttrs,
+                                        rawLineTail: lineTail,
+                                        fenceLength: tickCount,
+                                        isComplete: false,
+                                        isLanguageSettled: settled,
+                                        innerFencesCount: 0,
+                                        absoluteIndent: parentIndent + (streamContext.currentActiveIndentDelta || 0),
+                                        children: []
+                                    };
+                                    currentContext.children.push(codeBlockNode);
+                                    stack.push(codeBlockNode);
+                                    i = nextIdx;
+                                    if (settled && i < len && newText[i] === '\n') {
+                                        i++;
+                                        streamContext.isAtLineStart = true;
+                                    } else {
+                                        streamContext.isAtLineStart = false;
+                                    }
+                                    continue;
+                                }
                             } else {
                                 streamContext.inInlineCode = true;
                                 streamContext.activeInlineLength = tickCount;
@@ -796,6 +840,7 @@ class ScribeCompositor {
                                 type: matchedTag,
                                 content: '',
                                 attributes: newAttr,
+                                metaAttributes: '',
                                 isComplete: false,
                                 absoluteIndent: parentIndent + (streamContext.currentActiveIndentDelta || 0),
                                 children: []
@@ -838,14 +883,14 @@ class ScribeCompositor {
                     if (newText[i] === '}') { streamContext.braceDepth = Math.max(0, streamContext.braceDepth - 1); streamContext.currentMathBuffer += newText[i]; i++; continue; }
                     if (streamContext.mathState === 'block_dollar') {
                         if (newText.startsWith('$$', i) && streamContext.braceDepth === 0) {
-                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', metaAttributes: '', isComplete: true, children: [] });
                             streamContext.mathState = 'none'; i += 2; continue;
                         }
                         streamContext.currentMathBuffer += newText[i]; i++; continue;
                     }
                     else if (streamContext.mathState === 'block_bracket') {
                         if (newText.startsWith('\\]', i) && streamContext.braceDepth === 0) {
-                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', metaAttributes: '', isComplete: true, children: [] });
                             streamContext.mathState = 'none'; i += 2; continue;
                         }
                         streamContext.currentMathBuffer += newText[i]; i++; continue;
@@ -867,7 +912,7 @@ class ScribeCompositor {
                     }
                     else if (streamContext.mathState === 'inline_dollar') {
                         if (newText.startsWith('$$', i) && streamContext.braceDepth === 0) {
-                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: false, children: [] });
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', metaAttributes: '', isComplete: false, children: [] });
                             streamContext.mathState = 'block_dollar'; streamContext.braceDepth = 0; streamContext.currentMathBuffer = ""; i += 2; continue;
                         }
                         if (this._checkDoubleNewlineBoundary(newText, i) && streamContext.braceDepth === 0) {
@@ -888,7 +933,7 @@ class ScribeCompositor {
                         const closeTag = `\\end{${streamContext.activeEnvName}}`;
                         if (newText.startsWith(closeTag, i) && streamContext.braceDepth === 0) {
                             streamContext.currentMathBuffer += closeTag;
-                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: true, children: [] });
+                            currentContext.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', metaAttributes: '', isComplete: true, children: [] });
                             streamContext.mathState = 'none'; streamContext.activeEnvName = ""; i += closeTag.length; continue;
                         }
                         streamContext.currentMathBuffer += newText[i]; i++; continue;
@@ -922,7 +967,7 @@ class ScribeCompositor {
         }
 
         if (streamContext.mathState !== 'none' && ['block_dollar', 'block_bracket', 'env'].includes(streamContext.mathState)) {
-            currentClone.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', isComplete: false, children: [] });
+            currentClone.children.push({ type: 'math_block', content: streamContext.currentMathBuffer, attributes: '', metaAttributes: '', isComplete: false, children: [] });
         }
         
         let speculativeText = currentText;
@@ -943,7 +988,7 @@ class ScribeCompositor {
         if (speculativeText) {
             const deepCtx = stack[stack.length - 1];
             if (deepCtx.type === 'code_block' || deepCtx.type === 'artifact') currentClone.content = speculativeText;
-            else currentClone.children.push({ type: 'text', content: speculativeText, attributes: '', isComplete: false, children: [] });
+            else currentClone.children.push({ type: 'text', content: speculativeText, attributes: '', metaAttributes: '', isComplete: false, children: [] });
         }
 
         streamContext.parsedBlocks = clonedRoot.children;
@@ -1045,7 +1090,6 @@ class ScribeCompositor {
             selectionTracks = { start: startPos, end: startPos + currentRange.toString().length };
         }
 
-        // 2. Core Markdown Token Parsing & XSS Sanitization Pass
         let htmlOut = window.marked ? window.marked.parse(rawContent) : rawContent;
         if (window.DOMPurify) {
             htmlOut = window.DOMPurify.sanitize(htmlOut, {
@@ -1055,11 +1099,9 @@ class ScribeCompositor {
             });
         }
         
-        // 3. Instantiate an Isolated DOM Subtree Element (Transient AST Container)
         const tempNode = document.createElement('div');
         tempNode.innerHTML = htmlOut;
         
-        // 4. Resolve base64 Inclusions via Isolated Traversal
         tempNode.querySelectorAll('.static-markdown-nested').forEach((nestedWin) => {
             try {
                 const b64Val = nestedWin.dataset.val;
@@ -1070,10 +1112,8 @@ class ScribeCompositor {
             } catch (e) {}
         });
         
-        // 5. Discover and Convert Literal Tokens Natively via Text Node TreeWalker
         this._discoverAndConvertLiteralMath(tempNode);
         
-        // 6. Calculate Scope Constraints for Dynamic Text Environments
         const isInsideReasoningBox = targetElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
         const currentPromotedPool = [];
         
@@ -1095,10 +1135,8 @@ class ScribeCompositor {
             currentPromotedPool.push({ id: stableEditorId, lang: targetedLang, val: payload });
         });
         
-        // 7. ATOMIC DOM AST MIGRATION (Remaps Live Node Pointers Instantly)
         targetElement.replaceChildren(...tempNode.childNodes);
         
-        // 8. Restore Text Highlights Post-Migration Path
         if (selectionTracks) {
             try {
                 const restoreRange = document.createRange();
@@ -1130,12 +1168,10 @@ class ScribeCompositor {
             } catch (restoreError) {}
         }
         
-        // 9. Inject Sequential Math Tokens Into Migrated Elements
         if (registry && registry.length > 0) {
             this._injectMathNodes(targetElement, registry);
         }
         
-        // 10. Mount Dynamic Interface Layers (Ace Code Components)
         targetElement.querySelectorAll('.scribe-ace-wrapper-placeholder').forEach((placeholder) => {
             const editorId = placeholder.dataset.editorId;
             const matchData = currentPromotedPool.find(item => item.id === editorId);
@@ -1149,7 +1185,9 @@ class ScribeCompositor {
             const barLayout = document.createElement('div');
             barLayout.className = 'ace-action-bar';
             barLayout.innerHTML = `
-                <span class="ace-lang-label">${matchData.lang.toUpperCase()}</span>
+                <div class="ace-meta-container">
+                    <span class="ace-lang-label">${matchData.lang.toUpperCase()}</span>
+                </div>
                 <button class="action-btn ace-copy-btn">Copy Code</button>
             `;
             
@@ -1208,7 +1246,7 @@ class ScribeCompositor {
                             let successCount = 0;
                             
                             for (let line of lines) {
-                                let cleanLine = line.replace(/^(\$\$?|\\\[|\\\( counsel)/, '').replace(/(\$\$?|\\\]|\\\)) counsel$/, '').trim();
+                                let cleanLine = line.replace(/^(\$\$?|\\\[|\\\()/, '').replace(/(\$\$?|\\\]|\\\))$/, '').trim();
                                 if (!cleanLine) continue;
                                 
                                 const lineCacheKey = `${btoa(encodeURIComponent(cleanLine))}-block-split`;
@@ -1405,6 +1443,9 @@ class ScribeCompositor {
             const isMathLang = ['math', 'latex', 'katex'].includes(lang);
             const isInsideReasoningBox = containerElement && containerElement.closest('.scribe-thought-block, .scribe-candidate-block, .scribe-evaluation');
             
+            const metaData = this._parseAttributes(block.metaAttributes);
+            const explicitTitle = metaData['title'] || metaData['filename'] || '';
+
             if (isMathLang) {
                 wrapper.className = 'scribe-math-block-container'; wrapper.dataset.aceInjected = "false";
                 wrapper.dataset.lang = lang || "latex"; wrapper.dataset.isMathPrediction = "true";
@@ -1416,13 +1457,27 @@ class ScribeCompositor {
             } else if (isInsideReasoningBox || !isSettled || !this._isSupportedCodeLanguage(lang) || (lineCount < 3 && !block.isComplete)) {
                 wrapper.className = 'scribe-native-code-wrapper'; wrapper.dataset.aceInjected = "false"; wrapper.dataset.lang = lang;
                 const microBar = document.createElement('div'); microBar.className = 'ace-action-bar micro-action-bar';
+                const metaContainer = document.createElement('div'); metaContainer.className = 'ace-meta-container';
+                
                 const langLabel = document.createElement('span'); langLabel.className = 'ace-lang-label';
-                langLabel.textContent = (block.attributes || 'CODE').toUpperCase();
+                langLabel.textContent = (lang || 'CODE').toUpperCase();
+                metaContainer.appendChild(langLabel);
+
+                if (explicitTitle) {
+                    const chip = document.createElement('span'); chip.className = 'ace-meta-chip';
+                    chip.textContent = explicitTitle;
+                    metaContainer.appendChild(chip);
+                }
+
                 const copyBtn = document.createElement('button'); copyBtn.className = 'action-btn ace-copy-btn'; copyBtn.innerHTML = 'Copy';
-                microBar.appendChild(langLabel); microBar.appendChild(copyBtn);
+                microBar.appendChild(metaContainer); microBar.appendChild(copyBtn);
+                
                 const codeBody = document.createElement('div'); codeBody.className = 'scribe-text-block scribe-code-native';
                 codeBody.innerHTML = `<pre style="margin:0; font-family:var(--font-code, monospace); white-space:pre-wrap;"><code class="streaming-code-payload"></code></pre>`;
                 wrapper.appendChild(microBar); wrapper.appendChild(codeBody); target = codeBody.querySelector('.streaming-code-payload');
+                
+                Object.keys(metaData).forEach(key => { wrapper.setAttribute(`data-meta-${key}`, metaData[key]); });
+                
                 copyBtn.onclick = () => {
                     const dynamicPayload = wrapper.querySelector('code.streaming-code-payload')?.textContent || '';
                     this._copyTextWithFeedback(dynamicPayload, copyBtn, 'Copy', 'Copied!');
@@ -1430,12 +1485,26 @@ class ScribeCompositor {
             } else {
                 wrapper.className = 'scribe-ace-wrapper'; wrapper.dataset.aceInjected = "true"; wrapper.dataset.editorId = prefixId;
                 const actionBar = document.createElement('div'); actionBar.className = 'ace-action-bar';
+                const metaContainer = document.createElement('div'); metaContainer.className = 'ace-meta-container';
+                
                 const langLabel = document.createElement('span'); langLabel.className = 'ace-lang-label';
-                langLabel.textContent = block.attributes.toUpperCase() || "CODE";
+                langLabel.textContent = lang.toUpperCase() || "CODE";
+                metaContainer.appendChild(langLabel);
+
+                if (explicitTitle) {
+                    const chip = document.createElement('span'); chip.className = 'ace-meta-chip';
+                    chip.textContent = explicitTitle;
+                    metaContainer.appendChild(chip);
+                }
+
                 const copyBtn = document.createElement('button'); copyBtn.className = 'action-btn ace-copy-btn'; copyBtn.innerHTML = 'Copy Code';
-                actionBar.appendChild(langLabel); actionBar.appendChild(copyBtn);
+                actionBar.appendChild(metaContainer); actionBar.appendChild(copyBtn);
+                
                 const editorDiv = document.createElement('div'); editorDiv.id = prefixId; editorDiv.className = 'scribe-ace-editor';
                 wrapper.appendChild(actionBar); wrapper.appendChild(editorDiv); target = editorDiv;
+                
+                Object.keys(metaData).forEach(key => { wrapper.setAttribute(`data-meta-${key}`, metaData[key]); });
+                
                 copyBtn.onclick = () => { if (this.editorPool.has(prefixId)) this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!'); };
             }
         } else if (block.type === 'artifact') {
@@ -1449,12 +1518,26 @@ class ScribeCompositor {
             } else {
                 wrapper.className = 'scribe-ace-wrapper'; wrapper.dataset.aceInjected = "true"; wrapper.dataset.editorId = prefixId;
                 const actionBar = document.createElement('div'); actionBar.className = 'ace-action-bar';
+                const metaContainer = document.createElement('div'); metaContainer.className = 'ace-meta-container';
+                
                 const langLabel = document.createElement('span'); langLabel.className = 'ace-lang-label';
-                langLabel.textContent = name;
+                langLabel.textContent = lang.toUpperCase();
+                metaContainer.appendChild(langLabel);
+
+                if (name && name !== lang.toUpperCase()) {
+                    const chip = document.createElement('span'); chip.className = 'ace-meta-chip';
+                    chip.textContent = name;
+                    metaContainer.appendChild(chip);
+                }
+
                 const copyBtn = document.createElement('button'); copyBtn.className = 'action-btn ace-copy-btn'; copyBtn.innerHTML = 'Copy Code';
-                actionBar.appendChild(langLabel); actionBar.appendChild(copyBtn);
+                actionBar.appendChild(metaContainer); actionBar.appendChild(copyBtn);
+                
                 const editorDiv = document.createElement('div'); editorDiv.id = prefixId; editorDiv.className = 'scribe-ace-editor';
                 wrapper.appendChild(actionBar); wrapper.appendChild(editorDiv); target = editorDiv;
+                
+                Object.keys(attrs).forEach(key => { wrapper.setAttribute(`data-meta-${key}`, attrs[key]); });
+                
                 copyBtn.onclick = () => { if (this.editorPool.has(prefixId)) this._copyTextWithFeedback(this.editorPool.get(prefixId).getValue(), copyBtn, 'Copy Code', 'Copied!'); };
             }
         } else if (['think', 'rlm_exec', 'rlm_result', 'candidate', 'evaluation'].includes(block.type)) {
@@ -1531,9 +1614,40 @@ class ScribeCompositor {
                     }
                 }
             }
-            const needsRender = nodeObj.lastContentTrace !== block.content || nodeObj.lastRenderedCompletionState !== block.isComplete || block.type === 'math_block';
+            const needsRender = nodeObj.lastContentTrace !== block.content || nodeObj.lastRenderedCompletionState !== block.isComplete || block.type === 'math_block' || nodeObj.lastAttributesTrace !== block.attributes || nodeObj.lastMetaTrace !== block.metaAttributes;
             if (needsRender) {
-                nodeObj.lastContentTrace = block.content; nodeObj.lastRenderedCompletionState = block.isComplete;
+                nodeObj.lastContentTrace = block.content; 
+                nodeObj.lastRenderedCompletionState = block.isComplete;
+                nodeObj.lastAttributesTrace = block.attributes;
+                nodeObj.lastMetaTrace = block.metaAttributes;
+                
+                if (block.type === 'code_block' || block.type === 'artifact') {
+                    const langLabel = nodeObj.wrapper.querySelector('.ace-lang-label');
+                    if (langLabel) {
+                        const displayLang = block.type === 'code_block' ? block.attributes : (this._parseAttributes(block.attributes)['language'] || 'text');
+                        langLabel.textContent = (displayLang || 'CODE').toUpperCase();
+                    }
+                    const metaContainer = nodeObj.wrapper.querySelector('.ace-meta-container');
+                    if (metaContainer) {
+                        const existingChip = metaContainer.querySelector('.ace-meta-chip');
+                        const metaData = block.type === 'code_block' ? this._parseAttributes(block.metaAttributes) : this._parseAttributes(block.attributes);
+                        const explicitTitle = metaData['title'] || metaData['filename'] || '';
+                        if (explicitTitle) {
+                            if (existingChip) {
+                                existingChip.textContent = explicitTitle;
+                            } else {
+                                const chip = document.createElement('span');
+                                chip.className = 'ace-meta-chip';
+                                chip.textContent = explicitTitle;
+                                metaContainer.appendChild(chip);
+                            }
+                        } else if (existingChip) {
+                            existingChip.remove();
+                        }
+                        Object.keys(metaData).forEach(key => { nodeObj.wrapper.setAttribute(`data-meta-${key}`, metaData[key]); });
+                    }
+                }
+
                 if (block.type === 'text') this._renderMarkdownAndMath(nodeObj.target, block.content, registry, nodeObj);
                 else if (nodeObj.wrapper.classList.contains('scribe-markdown-preview-block')) this._renderMarkdownAndMath(nodeObj.target, block.content, registry, nodeObj);
                 else if (block.type === 'math_block' || (block.type === 'code_block' && (['math', 'latex', 'katex'].includes(nodeObj.wrapper.dataset.lang) || nodeObj.wrapper.dataset.isMathPrediction === "true"))) {
@@ -1551,7 +1665,7 @@ class ScribeCompositor {
                                 let combinedHtml = '';
                                 let successCount = 0;
                                 for (let line of lines) {
-                                    let cleanLine = line.replace(/^(\$\$?|\\\[|\\\( counsel)/, '').replace(/(\$\$?|\\\]|\\\)) counsel$/, '').trim();
+                                    let cleanLine = line.replace(/^(\$\$?|\\\[|\\\()/, '').replace(/(\$\$?|\\\]|\\\))$/, '').trim();
                                     if (!cleanLine) continue;
                                     const lineCacheKey = `${btoa(encodeURIComponent(cleanLine))}-block-split`;
                                     if (this.mathRenderCache.has(lineCacheKey)) {
