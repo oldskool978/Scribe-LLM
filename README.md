@@ -48,7 +48,7 @@ The backend runtime is constructed using standard Python primitives, while the i
 ```text
 Scribe-LLM/
 ├── server.py                 # Core backend daemon, hardware profiler, and request routing
-├── start.bat                 # Zero-dependency bootstrap script for Windows environments
+├── start.*                   # Zero-dependency operating system dependant bootstrap
 ├── requirements.txt          # Explicit package dependency manifest definition array
 ├── models/                   # Storage directory for local GGUF models and associated layers
 ├── LMCPP/                    # High-performance C++ core inference binaries
