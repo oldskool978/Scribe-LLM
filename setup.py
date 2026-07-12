@@ -12,6 +12,7 @@ import zipfile
 import tarfile
 import stat
 import time
+import platform
 from pathlib import Path
 
 DEPENDENCY_GRAPH = {
@@ -121,7 +122,16 @@ def fetch_standalone_runtime(version: str, target_dir: Path) -> Path:
             
         executable = target_dir / "python.exe"
     else:
-        arch = "x86_64" if sys.maxsize > 2**32 else "i686"
+        raw_arch = platform.machine().lower()
+        if raw_arch in ("x86_64", "amd64"):
+            arch = "x86_64"
+        elif raw_arch in ("aarch64", "arm64"):
+            arch = "aarch64"
+        elif raw_arch in ("i386", "i686"):
+            arch = "i686"
+        else:
+            arch = raw_arch
+
         triple = f"{arch}-unknown-linux-gnu" if sys.platform.startswith("linux") else f"{arch}-apple-darwin"
         archive_name = f"cpython-{version}+20260510-{triple}-install_only.tar.gz"
         url = f"https://github.com/astral-sh/python-build-standalone/releases/download/20260510/{archive_name}"
@@ -136,7 +146,10 @@ def fetch_standalone_runtime(version: str, target_dir: Path) -> Path:
                 out_file.write(chunk)
 
         with tarfile.open(archive_path, "r:gz") as tar_ref:
-            tar_ref.extractall(target_dir.parent)
+            try:
+                tar_ref.extractall(target_dir.parent, filter='data')
+            except TypeError:
+                tar_ref.extractall(target_dir.parent)
         archive_path.unlink()
         
         source_extracted = target_dir.parent / "python"
@@ -185,10 +198,7 @@ def main():
     if args.update:
         print_status("Executing structural purges for compilation layers...")
         purge_targets = [
-            project_root / "lib",
-            project_root / "mcpp",
-            project_root / "font.css",
-            project_root / "static" / "css" / "font.css"
+            project_root / "lib", project_root / "mcpp", project_root / "font.css", project_root / "static" / "css" / "font.css"
         ]
         for target in purge_targets:
             if target.exists():
@@ -198,8 +208,7 @@ def main():
     selected_version = args.python
     if not selected_version and venv_python.exists() and not args.update:
         try:
-            probe = subprocess.run([str(venv_python), "-c", "import sys; print(sys.version.split()[0])"], 
-                                   capture_output=True, text=True, check=True)
+            probe = subprocess.run([str(venv_python), "-c", "import sys; print(sys.version.split()[0])"], capture_output=True, text=True, check=True)
             selected_version = probe.stdout.strip()
             print_status(f"Active runtime core layer detected inside workspace: {selected_version}", "SUCCESS")
         except Exception:
@@ -220,8 +229,7 @@ def main():
     skip_provisioning = False
     if venv_python.exists() and not args.update:
         try:
-            probe = subprocess.run([str(venv_python), "-c", "import sys; print(sys.version.split()[0])"], 
-                                   capture_output=True, text=True, check=True)
+            probe = subprocess.run([str(venv_python), "-c", "import sys; print(sys.version.split()[0])"], capture_output=True, text=True, check=True)
             if probe.stdout.strip() == selected_version:
                 print_status("Runtime core version constraint verified. Skipping provisioning phase.", "SUCCESS")
                 skip_provisioning = True
@@ -327,8 +335,7 @@ def main():
 
     if os.name == 'nt':
         (project_root / "start.bat").write_text(
-            "@echo off\ntitle Scribe-LLM Local Core\ncolor 0b\n\".venv\\python.exe\" server.py\npause\n", 
-            encoding="utf-8"
+            "@echo off\ntitle Scribe-LLM Local Core\ncolor 0b\n\".venv\\python.exe\" server.py\npause\n", encoding="utf-8"
         )
     else:
         start_sh = project_root / "start.sh"
