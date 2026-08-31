@@ -1,5 +1,6 @@
-# Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md.
+from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -303,19 +304,19 @@ def select_assets(release_assets: list[dict], profile: dict) -> tuple[list[dict]
     def match_any(keywords: list[str]) -> dict | None:
         for a in release_assets:
             n = a.get("name", "").lower()
-            if all(k in n for k in keywords):
+            if all(k in n for k in keywords) and n.endswith((".zip", ".tar.gz")):
                 return a
         return None
 
     if os.name == "nt":
         if target_backend == "rocm":
-            for rocm_keys in [["bin-win", "rocm", "x64.zip"], ["bin-win", "hip", "x64.zip"]]:
+            for rocm_keys in [["bin-win", "rocm", "x64"], ["bin-win", "hip", "x64"]]:
                 if matched := match_any(rocm_keys):
                     assets_to_fetch.append(matched)
                     return assets_to_fetch, "rocm"
             target_backend = "vulkan"
         elif target_backend == "cuda":
-            if bin_cu := (match_any(["bin-win", "cuda", "x64.zip"]) or match_any(["bin-win", "cu", "x64.zip"])):
+            if bin_cu := (match_any(["bin-win", "cuda", "x64"]) or match_any(["bin-win", "cu", "x64"])):
                 assets_to_fetch.append(bin_cu)
             if cudart := match_any(["cudart", "bin-win"]):
                 assets_to_fetch.append(cudart)
@@ -323,14 +324,16 @@ def select_assets(release_assets: list[dict], profile: dict) -> tuple[list[dict]
                 return assets_to_fetch, "cuda"
             target_backend = "vulkan"
         if target_backend == "vulkan":
-            if bin_vk := match_any(["bin-win", "vulkan", "x64.zip"]):
+            if bin_vk := match_any(["bin-win", "vulkan", "x64"]):
                 assets_to_fetch.append(bin_vk)
                 return assets_to_fetch, "vulkan"
-        if bin_cpu := (match_any(["bin-win", "avx2", "x64.zip"]) or match_any(["bin-win", "x64.zip"])):
-            assets_to_fetch.append(bin_cpu)
-            return assets_to_fetch, "cpu"
+        for a in release_assets:
+            n = a.get("name", "").lower()
+            if "bin-win" in n and ("avx2" in n or "x64" in n) and not any(x in n for x in ["cuda", "rocm", "hip", "vulkan", "arm64"]) and n.endswith(".zip"):
+                assets_to_fetch.append(a)
+                return assets_to_fetch, "cpu"
     elif sys.platform == "darwin":
-        if bin_mac := (match_any(["bin-macos", "arm64.zip"]) or match_any(["bin-macos", "universal.zip"])):
+        if bin_mac := (match_any(["bin-macos", "arm64"]) or match_any(["bin-macos", "universal"])):
             assets_to_fetch.append(bin_mac)
             return assets_to_fetch, "metal"
     else:
