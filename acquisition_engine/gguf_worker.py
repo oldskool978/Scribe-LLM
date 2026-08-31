@@ -221,23 +221,37 @@ def inspect_config_topology(config_path: Path) -> dict:
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
+            
+            sub_configs = [data]
+            for sub_key in ["thinker_config", "talker_config", "text_config", "vision_config", "audio_config", "speaker_encoder_config"]:
+                sub_val = data.get(sub_key)
+                if isinstance(sub_val, dict):
+                    sub_configs.append(sub_val)
+                    for inner_key in ["vision_config", "audio_config", "text_config"]:
+                        if isinstance(sub_val.get(inner_key), dict):
+                            sub_configs.append(sub_val[inner_key])
+
             archs = data.get("architectures", [])
             arch_str = "".join(archs).lower()
-            
-            if (
-                data.get("num_local_experts", 0) > 0 or 
-                data.get("n_experts", 0) > 0 or
-                data.get("num_experts", 0) > 0 or
-                data.get("n_routed_experts", 0) > 0 or
-                data.get("expert_model") is not None or 
-                "mixtral" in arch_str or 
-                "deepseek" in arch_str or
-                "moe" in arch_str
-            ):
+
+            for cfg in sub_configs:
+                if (
+                    cfg.get("num_local_experts", 0) > 0 or 
+                    cfg.get("n_experts", 0) > 0 or
+                    cfg.get("num_experts", 0) > 0 or
+                    cfg.get("n_routed_experts", 0) > 0 or
+                    cfg.get("expert_model") is not None
+                ):
+                    topology["is_moe"] = True
+                    
+                multimodal_anchors = ["vision_config", "vision_encoder", "audio_config", "whisper_config", "speaker_encoder_config", "image_size", "num_mel_bins"]
+                if any(k in cfg for k in multimodal_anchors):
+                    topology["is_multimodal"] = True
+
+            if "mixtral" in arch_str or "deepseek" in arch_str or "moe" in arch_str:
                 topology["is_moe"] = True
-                
-            multimodal_anchors = ["vision_config", "vision_encoder", "audio_config", "whisper_config"]
-            if any(k in data for k in multimodal_anchors):
+
+            if "omni" in arch_str or "vl" in arch_str or "tts" in arch_str or "asr" in arch_str:
                 topology["is_multimodal"] = True
                 
             if "mtp" in arch_str or "multitoken" in arch_str:
@@ -332,7 +346,7 @@ class DAGContext:
     def __init__(self, repo_id: str, token: str, profile: str, requires_jinja: bool, is_direct: bool):
         self.repo_id = repo_id
         self.token = token
-        self.profile = profile.upper()
+        self.profile = profile.upper() if profile else "BF16"
         self.requires_jinja = requires_jinja
         self.is_direct = is_direct
         
@@ -482,7 +496,7 @@ class DAGExecutionEngine:
             paths.extend(clean_paths)
 
         bootstrap_payload = (
-            "import sys, types, runpy, os\n"
+            "import sys, types, runpy, os, re\n"
             f"for p in {json.dumps(paths)}:\n"
             "    if p not in sys.path: sys.path.insert(0, p)\n"
             "class UniversalMock:\n"
@@ -530,10 +544,91 @@ class DAGExecutionEngine:
             "    'torch.distributed',\n"
             "    'torch._C._distributed_c10d'\n"
             "]))\n"
+            "def _apply_conversion_polyills():\n"
+            "    try:\n"
+            "        import gguf\n"
+            "        from conversion.base import ModelBase\n"
+            "        _orig_init = ModelBase.__init__\n"
+            "        def _poly_init(self, *args, **kwargs):\n"
+            "            _orig_init(self, *args, **kwargs)\n"
+            "            if getattr(self, 'fuse_gate_up_exps', False):\n"
+            "                t_map = getattr(self, 'tensor_map', None)\n"
+            "                if t_map is not None and gguf.MODEL_TENSOR.FFN_GATE_UP_EXP not in t_map.mapping:\n"
+            "                    self.fuse_gate_up_exps = False\n"
+            "        ModelBase.__init__ = _poly_init\n"
+            "        _orig_modify = ModelBase.modify_tensors\n"
+            "        def _poly_modify(self, data_torch, name, bid):\n"
+            "            t_map = getattr(self, 'tensor_map', None)\n"
+            "            if getattr(self, 'fuse_gate_up_exps', False) and t_map is not None:\n"
+            "                if gguf.MODEL_TENSOR.FFN_GATE_UP_EXP not in t_map.mapping:\n"
+            "                    self.fuse_gate_up_exps = False\n"
+            "            if not getattr(self, 'fuse_gate_up_exps', False):\n"
+            "                if name.endswith(('mlp.experts.gate_proj.weight', 'mlp.experts.gate_proj')):\n"
+            "                    yield (self.format_tensor_name(gguf.MODEL_TENSOR.FFN_GATE_EXP, bid, '.weight'), data_torch)\n"
+            "                    return\n"
+            "                if name.endswith(('mlp.experts.up_proj.weight', 'mlp.experts.up_proj')):\n"
+            "                    yield (self.format_tensor_name(gguf.MODEL_TENSOR.FFN_UP_EXP, bid, '.weight'), data_torch)\n"
+            "                    return\n"
+            "                if name.endswith(('mlp.experts.down_proj.weight', 'mlp.experts.down_proj')):\n"
+            "                    yield (self.format_tensor_name(gguf.MODEL_TENSOR.FFN_DOWN_EXP, bid, '.weight'), data_torch)\n"
+            "                    return\n"
+            "            yield from _orig_modify(self, data_torch, name, bid)\n"
+            "        ModelBase.modify_tensors = _poly_modify\n"
+            "    except Exception:\n"
+            "        pass\n"
+            "    try:\n"
+            "        import torch\n"
+            "        from conversion.qwen import Qwen2MoeModel\n"
+            "        _orig_qwen2_modify = Qwen2MoeModel.modify_tensors\n"
+            "        def _poly_qwen2_modify(self, data_torch, name, bid):\n"
+            "            is_unbundled = bool(re.search(r'\\.experts\\.\\d+\\.', name))\n"
+            "            if is_unbundled:\n"
+            "                n_exp = self.find_hparam(['num_local_experts', 'num_experts'])\n"
+            "                if bid is not None:\n"
+            "                    if self._experts is None:\n"
+            "                        self._experts = [{} for _ in range(self.block_count)]\n"
+            "                    self._experts[bid][name] = data_torch\n"
+            "                    if len(self._experts[bid]) >= n_exp * 3:\n"
+            "                        for w_name in ['down_proj', 'gate_proj', 'up_proj']:\n"
+            "                            datas = []\n"
+            "                            for xid in range(n_exp):\n"
+            "                                ename = f'model.layers.{bid}.mlp.experts.{xid}.{w_name}.weight'\n"
+            "                                if ename not in self._experts[bid]:\n"
+            "                                    ename = f'thinker.model.layers.{bid}.mlp.experts.{xid}.{w_name}.weight'\n"
+            "                                if ename in self._experts[bid]:\n"
+            "                                    datas.append(self._experts[bid][ename])\n"
+            "                                    del self._experts[bid][ename]\n"
+            "                            if len(datas) == n_exp:\n"
+            "                                data_torch = torch.stack(datas, dim=0)\n"
+            "                                merged_name = f'model.layers.{bid}.mlp.experts.{w_name}.weight'\n"
+            "                                yield from ModelBase.modify_tensors(self, data_torch, merged_name, bid)\n"
+            "                        return\n"
+            "                    else:\n"
+            "                        return\n"
+            "            if name.endswith(('mlp.experts.gate_proj.weight', 'mlp.experts.up_proj.weight', 'mlp.experts.down_proj.weight')):\n"
+            "                yield from ModelBase.modify_tensors(self, data_torch, name, bid)\n"
+            "                return\n"
+            "            yield from _orig_qwen2_modify(self, data_torch, name, bid)\n"
+            "        Qwen2MoeModel.modify_tensors = _poly_qwen2_modify\n"
+            "    except Exception:\n"
+            "        pass\n"
+            "    try:\n"
+            "        from conversion.qwen3vl import Qwen3OmniMmprojModel, MmprojModel\n"
+            "        def _poly_omni_filter(cls, item):\n"
+            "            name, gen = item\n"
+            "            if name.startswith('lm_head.') or name.startswith('mtp.'): return None\n"
+            "            if name.startswith('thinker.visual.'): name = name.replace('thinker.visual.', 'visual.', 1)\n"
+            "            elif name.startswith('model.visual.'): name = name.replace('model.visual.', 'visual.', 1)\n"
+            "            elif name.startswith('thinker.audio_tower.'): name = name.replace('thinker.audio_tower.', 'audio_tower.', 1)\n"
+            "            if not name.startswith('visual.') and not name.startswith('audio_tower.'): return None\n"
+            "            return MmprojModel.filter_tensors((name, gen))\n"
+            "        Qwen3OmniMmprojModel.filter_tensors = classmethod(_poly_omni_filter)\n"
+            "    except Exception:\n"
+            "        pass\n"
+            "_apply_conversion_polyills()\n"
             "runpy.run_path(sys.argv.pop(1), run_name='__main__')\n"
         )
 
-        # Pass 1: Primary Text / Base Model Core Extraction
         cmd_convert = [
             sys.executable, "-u", "-c", bootstrap_payload,
             str(TARGET_DIR / "convert_hf_to_gguf.py"),
@@ -568,27 +663,23 @@ class DAGExecutionEngine:
         if process.returncode != 0: 
             raise RuntimeError(f"Base architectural transformation failed with exit code: {process.returncode}")
 
-        # Deterministic Base Capture Rule: Lock onto raw text trunk files immediately.
-        # This completely walls off permanent sidecars from imatrix execution and deletion arrays.
         current_files = set(OUTPUT_DIR.iterdir())
         self.ctx.captured_base_shards = sorted([f for f in (current_files - existing_files) if f.is_file()])
         
         if not self.ctx.captured_base_shards:
             raise FileNotFoundError("Footprint tracking failure: Base compiler did not write structural output files.")
 
-        # Recalibrate tracking baseline to shield subsequent extractions from cleanup passes
         existing_files = set(OUTPUT_DIR.iterdir())
 
-        # Pass 2: Secondary Multimodal Projector Extraction Pass
         if self.ctx.topology.get("is_multimodal"):
-            target_mmproj_name = OUTPUT_DIR / f"{self.ctx.safe_basename}-MMPROJ.gguf"
+            target_mmproj_name = OUTPUT_DIR / f"{self.ctx.safe_basename}-mmproj.gguf"
             print_log("[DAG NODE 3b] Executing Secondary Multi-Modal Projector Extraction Pass...")
             
             cmd_projector = [
                 sys.executable, "-u", "-c", bootstrap_payload,
                 str(TARGET_DIR / "convert_hf_to_gguf.py"),
                 str(self.ctx.model_staging_dir), "--outfile", str(target_mmproj_name),
-                "--outtype", "f16", "--mmproj"  # Force un-quantized F16 precision to safeguard alignment features
+                "--outtype", "f16", "--mmproj"
             ]
             
             proj_process = subprocess.Popen(cmd_projector, cwd=str(TARGET_DIR), env=self.ctx.hermetic_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -597,11 +688,10 @@ class DAGExecutionEngine:
             proj_process.wait()
             
             if proj_process.returncode == 0:
-                print_log(f"[SUCCESS] Vision projection matrices bound to payload bay: {target_mmproj_name.name}")
+                print_log(f"[SUCCESS] Vision/Audio projection matrices bound to payload bay: {target_mmproj_name.name}")
             else:
                 print_log(f"[ERROR] Multimodal projector extraction failed with code: {proj_process.returncode}")
 
-        # Pass 3: Secondary Speculative MTP Draft Extraction Pass
         if self.ctx.topology.get("has_mtp"):
             target_mtp_name = OUTPUT_DIR / f"mtp-{self.ctx.safe_basename}-{self.ctx.profile}.gguf"
             print_log("[DAG NODE 3c] Executing Secondary Speculative MTP Shard Extraction Pass...")
@@ -642,7 +732,7 @@ class DAGExecutionEngine:
             self.ctx.requires_imatrix = False
             return
 
-        cpu_cores = os.cpu_count()
+        cpu_cores = os.cpu_count() or 4
         optimal_threads = min(16, max(1, cpu_cores // 2))
         if cpu_cores > 32:
             optimal_threads = 16
