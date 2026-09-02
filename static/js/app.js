@@ -1,5 +1,3 @@
-// Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md.
-
 class MultimodalProcessor {
     static MAX_DIMENSION = 1024;
     static TARGET_QUALITY = 0.85;
