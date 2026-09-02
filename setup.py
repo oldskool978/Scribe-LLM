@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md.
-
 import os
 import sys
 import shutil
