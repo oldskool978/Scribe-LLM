@@ -1,5 +1,3 @@
-// Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md.
-
 class ScribeCompositor {
     static BARRED_FROM_ACE = new Set(['mermaid', 'markdown', 'md', 'text', 'txt', 'prose', 'math', 'latex', 'katex', 'plain_text', 'plain']);
     static AI_QUIRKS = {
