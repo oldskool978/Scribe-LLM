@@ -1,5 +1,3 @@
-// Copyright (c) 2026 Hector Nunez. Licensed under PolyForm Shield License 1.0.0. See LICENSE.md.
-
 class LexicalAutomaton {
     static extractBlock(text, tag) {
         if (!text) return null;
